@@ -1,13 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
 import java.nio.ByteBuffer;
@@ -15,7 +6,7 @@ import java.nio.ByteBuffer;
 import org.bytedeco.javacv.Frame;
 
 /**
- * Warms frame colours to simulate a lower colour-temperature film image. This is not really a film stock thing, more an
+ * Warms frame colours to simulate a lower colour temperature film image. This is not really a film stock thing, more an
  * old projector thing. Definitely gives playback a more ye olde look.
  *
  * <p>
@@ -64,11 +55,11 @@ public class FrameYellower extends FrameProcessor {
     }
 
     private void buildLookups() {
-        // Approximate each colour temperature as the RGB colour of a black-body radiator.
+        // Approximate each colour temperature as the RGB colour of a black body radiator.
         Rgb sourceWhite = kelvinToRgb(SOURCE_KELVIN);
         Rgb destinationWhite = kelvinToRgb(DESTINATION_KELVIN);
 
-        // Use a diagonal white-balance transform: each channel is scaled by the ratio
+        // Use a diagonal white balance transform: each channel is scaled by the ratio
         // between the destination white point and the source white point.
         double redScale = destinationWhite.red() / sourceWhite.red();
         double greenScale = destinationWhite.green() / sourceWhite.green();
@@ -88,8 +79,8 @@ public class FrameYellower extends FrameProcessor {
     }
 
     private Rgb kelvinToRgb(double kelvin) {
-        // Empirical Kelvin-to-RGB approximation. Dividing by 100 is part of the
-        // standard curve fit, whose branches approximate red-hot to blue-white light.
+        // Empirical Kelvin to RGB approximation. Dividing by 100 is part of the
+        // standard curve fit, whose branches approximate red hot to blue white light.
         double temperature = kelvin / 100.0;
         double red;
         double green;

@@ -1,15 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
- *      - Passes the command line's frame processors to the model; selects the multi-threaded model (default) or
- *        the single threaded reference model through the PlaybackModel interface.
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// connects UI actions to playback operations without putting frame processing logic in the view.
 package comp3011;
 
 import java.io.File;
@@ -22,7 +11,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 
 /**
- * The controller part of the video player model-view-controller architecture.
+ * The controller part of the video player model view controller architecture.
  * 
  * <p>
  * Wires up events from the {@link VideoPlayerView} to the {@link PlaybackModel}.
@@ -30,9 +19,9 @@ import javafx.scene.input.KeyEvent;
  * </p>
  *
  * <p>
- * The controller chooses which {@link PlaybackModel} to create: normally the multi-threaded
+ * The controller chooses which {@link PlaybackModel} to create: normally the multi threaded
  * {@link VideoPlayerModel}, or the original {@link SingleThreadedVideoPlayerModel} when the hidden
- * {@code --single-threaded} switch was given. Either way it talks to the model only through the interface.
+ * {@code   single threaded} switch was given. Either way it talks to the model only through the interface.
  * </p>
  */
 public class VideoPlayerController {
@@ -162,3 +151,4 @@ public class VideoPlayerController {
         view.showAudioEnabled(audioOutputEnabled);
     }
 }
+

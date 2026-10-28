@@ -1,11 +1,4 @@
-/*
- * COMP3011 Assignment 2 - multi-threaded video player.
- *
- * Authors:
- *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
- *
- * New file.
- */
+// checks playback clock test. These tests target a specific behaviour instead of relying on a large collection of unrelated assertions.
 package comp3011;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

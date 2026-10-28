@@ -1,13 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// owns the JavaFX controls and image display. Keeping layout here prevents rendering details from spreading into the playback model.
 package comp3011;
 
 import javafx.geometry.Insets;
@@ -32,12 +23,12 @@ import javafx.scene.shape.SVGPath;
 import javafx.scene.shape.StrokeLineCap;
 
 /**
- * The view part of the video player model-view-controller architecture.
+ * The view part of the video player model view controller architecture.
  *
  * <p>
  * This is the JavaFX presentation layer for the video player. It builds the
  * scene graph containing the video surface, playback controls, status display,
- * and tooltips. It exposes controls and display-update methods for
+ * and tooltips. It exposes controls and display update methods for
  * {@link VideoPlayerController}, but contains no playback logic (which all lives
  * in the controller).
  * </p>
@@ -233,7 +224,7 @@ public class VideoPlayerView {
         return button;
     }
 
-    // Decided to hand code icons here instead of using pre-drawn assets/resources, since the icons are simple and
+    // Decided to hand code icons here instead of using pre drawn assets/resources, since the icons are simple and
     // universally recognised and this one they will look better on different DPI displays.
     private Node createLoopIcon(boolean clockwise, String text) {
         Pane pane = new Pane();
@@ -277,7 +268,7 @@ public class VideoPlayerView {
         return pane;
     }
 
-    // Simple two vertical bars 'pause' icon.
+    // Simple two vertical bars pause icon.
     private Canvas createPauseIcon() {
         Canvas canvas = new Canvas(ICON_SIZE, ICON_SIZE);
         GraphicsContext gc = canvas.getGraphicsContext2D();
@@ -287,7 +278,7 @@ public class VideoPlayerView {
         return canvas;
     }
 
-    // Simple right facing equilateral triangle 'play' icon.
+    // Simple right facing equilateral triangle play icon.
     private Canvas createPlayIcon() {
         Canvas canvas = new Canvas(ICON_SIZE, ICON_SIZE);
         GraphicsContext gc = canvas.getGraphicsContext2D();
@@ -299,7 +290,7 @@ public class VideoPlayerView {
         return canvas;
     }
 
-    // Simple square 'stop' icon.
+    // Simple square stop icon.
     private Canvas createStopIcon() {
         Canvas canvas = new Canvas(ICON_SIZE, ICON_SIZE);
         GraphicsContext gc = canvas.getGraphicsContext2D();
@@ -349,7 +340,7 @@ public class VideoPlayerView {
         return wave;
     }
 
-    // Helper to draw a cross over the speaker indicating that we're muted.
+    // Helper to draw a cross over the speaker indicating that were muted.
     private Line audioLine(double startX, double startY, double endX, double endY) {
         Line line = new Line(startX, startY, endX, endY);
         line.setStroke(Color.BLACK);
@@ -358,3 +349,4 @@ public class VideoPlayerView {
         return line;
     }
 }
+

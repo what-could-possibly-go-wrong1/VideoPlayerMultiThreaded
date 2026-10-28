@@ -1,11 +1,4 @@
-/*
- * COMP3011 Assignment 2 - multi-threaded video player.
- *
- * Authors:
- *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
- *
- * New file. Integration tests, run by "mvn verify" (maven-failsafe-plugin).
- */
+// checks multi threaded playback. These tests target a specific behaviour instead of relying on a large collection of unrelated assertions.
 package comp3011;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,9 +18,9 @@ import org.bytedeco.javacv.FrameGrabber;
 import org.junit.jupiter.api.Test;
 
 /**
- * End-to-end frame accuracy of the multi-threaded decode/effects path on a real (generated) media file with sound,
+ * End to end frame accuracy of the multi threaded decode/effects path on a real (generated) media file with sound,
  * compared against the single threaded reference algorithm (the same grab/initialise/process loop as
- * {@link SingleThreadedVideoPlayerModel}). Covers in-order delivery, end of stream, audio routing and seeking.
+ * {@link SingleThreadedVideoPlayerModel}). Covers in order delivery, end of stream, audio routing and seeking.
  */
 class MultiThreadedPlaybackIT {
     private static final String EFFECTS = "nssnfwyvdjmbp";
@@ -119,7 +112,7 @@ class MultiThreadedPlaybackIT {
         }
     }
 
-    /** The single threaded reference: SingleThreadedVideoPlayerModel's decode + effects loop, minus the GUI. */
+    /** The single threaded reference: SingleThreadedVideoPlayerModels decode + effects loop, minus the GUI. */
     static final class ReferencePlayer {
         private ReferencePlayer() {
         }

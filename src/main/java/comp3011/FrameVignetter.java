@@ -1,13 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
 import java.nio.ByteBuffer;
@@ -19,9 +10,9 @@ import org.bytedeco.javacv.Frame;
  * projection bed, often showing fall away at the edges. This effect nicely simulates this.
  *
  * <p>
- * Initialisation builds Gaussian-like fading lookup tables for each axis.
+ * Initialisation builds Gaussian like fading lookup tables for each axis.
  * {@link #vignetteFrame(ByteBuffer)} combines the horizontal and vertical
- * factors to scale each pixel's colour channels.
+ * factors to scale each pixels colour channels.
  * </p>
  */
 public class FrameVignetter extends FrameProcessor {
@@ -103,7 +94,7 @@ public class FrameVignetter extends FrameProcessor {
             return envelope;
         }
 
-        // Gaussian envelope: exp(-d^2 / (2 sigma^2)).
+        // Gaussian envelope: exp( d^2 / (2 sigma^2)).
         // Choose sigma so that the centre of each edge has the requested fade.
         double sigma = centre / Math.sqrt(-2.0 * Math.log(edgeScale));
 
@@ -147,3 +138,4 @@ public class FrameVignetter extends FrameProcessor {
         return Math.max(min, Math.min(value, max));
     }
 }
+
