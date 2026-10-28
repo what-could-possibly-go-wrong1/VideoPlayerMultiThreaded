@@ -4,7 +4,8 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Made safe for concurrent process() calls: the source-pixel scratch buffer is now per thread.
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -33,8 +34,11 @@ public class FrameJitterer extends FrameProcessor {
 
     private final int instanceIndex;
     private int mediaSeed;
-    private byte[] sourcePixels;
-    private byte[] blackRow;
+    // Working copy of the frame being jittered. It is written on every frame, so a single shared buffer would be a
+    // race when two worker threads jitter two frames at once (one frame's pixels would leak into the other). Each
+    // thread therefore gets its own, allocated once per thread rather than once per frame.
+    private ThreadLocal<byte[]> sourcePixelsPerThread;
+    private byte[] blackRow; // Read-only after initialise, so safely shared.
 
     public FrameJitterer() {
         super();
@@ -48,7 +52,7 @@ public class FrameJitterer extends FrameProcessor {
 
         int frameBytes = videoInfo.imageStride() * videoInfo.imageHeight();
         int widthBytes = videoInfo.imageWidth() * videoInfo.imageChannels();
-        sourcePixels = new byte[frameBytes];
+        sourcePixelsPerThread = ThreadLocal.withInitial(() -> new byte[frameBytes]);
         blackRow = new byte[widthBytes];
     }
 
@@ -130,6 +134,7 @@ public class FrameJitterer extends FrameProcessor {
         int frameBytes = stride * height;
         int widthBytes = width * channels;
 
+        byte[] sourcePixels = sourcePixelsPerThread.get();
         ByteBuffer source = pixels.duplicate();
         source.clear();
         source.get(sourcePixels, 0, frameBytes);

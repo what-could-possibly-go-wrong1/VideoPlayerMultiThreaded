@@ -4,7 +4,9 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Made safe for concurrent process() calls: the three per-frame mask buffers are now per thread and
+ *        passed explicitly to the methods that use them. Arithmetic is unchanged, so output is identical.
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -19,9 +21,9 @@ import org.bytedeco.javacv.Frame;
  * This one is expensive in CPU time!
  *
  * <p>
- * For each frame, {@link #buildBrightMask(ByteBuffer)} identifies bright
- * regions, {@link #blurBrightMask()} spreads their influence, and
- * {@link #applyBleed(ByteBuffer)} adds the resulting coloured glow.
+ * For each frame, {@link #buildBrightMask(ByteBuffer, double[])} identifies bright
+ * regions, {@link #blurBrightMask(Masks)} spreads their influence, and
+ * {@link #applyBleed(ByteBuffer, double[])} adds the resulting coloured glow.
  * </p>
  */
 public class FrameBleeder extends FrameProcessor {
@@ -36,9 +38,9 @@ public class FrameBleeder extends FrameProcessor {
 
     private int maskWidth;
     private int maskHeight;
-    private double[] brightMask;
-    private double[] horizontalBlurMask;
-    private double[] blurredMask;
+    // The bright/blur masks are rewritten for every frame, so they cannot be shared between worker threads
+    // processing different frames at once. Each thread keeps its own set (allocated once per thread).
+    private ThreadLocal<Masks> masksPerThread;
     private int[] xMaskLeft;
     private double[] xMaskBlend;
     private int[] yMaskTop;
@@ -54,9 +56,8 @@ public class FrameBleeder extends FrameProcessor {
 
         maskWidth = (videoInfo.imageWidth() + MASK_BLOCK_SIZE - 1) / MASK_BLOCK_SIZE;
         maskHeight = (videoInfo.imageHeight() + MASK_BLOCK_SIZE - 1) / MASK_BLOCK_SIZE;
-        brightMask = new double[maskWidth * maskHeight];
-        horizontalBlurMask = new double[brightMask.length];
-        blurredMask = new double[brightMask.length];
+        int maskSize = maskWidth * maskHeight;
+        masksPerThread = ThreadLocal.withInitial(() -> new Masks(maskSize));
         buildSamplingLookups();
     }
 
@@ -78,9 +79,10 @@ public class FrameBleeder extends FrameProcessor {
             throw new Exception("FrameBleeder requires at least three image channels");
         }
 
-        buildBrightMask(pixels);
-        blurBrightMask();
-        applyBleed(pixels);
+        Masks masks = masksPerThread.get();
+        buildBrightMask(pixels, masks.bright);
+        blurBrightMask(masks);
+        applyBleed(pixels, masks.blurred);
     }
 
     private void buildSamplingLookups() {
@@ -117,7 +119,7 @@ public class FrameBleeder extends FrameProcessor {
         }
     }
 
-    private void buildBrightMask(ByteBuffer pixels) {
+    private void buildBrightMask(ByteBuffer pixels, double[] brightMask) {
         int width = videoInfo.imageWidth();
         int height = videoInfo.imageHeight();
         int channels = videoInfo.imageChannels();
@@ -159,9 +161,9 @@ public class FrameBleeder extends FrameProcessor {
         return Math.pow(normalised, BLEED_GAMMA);
     }
 
-    private void blurBrightMask() {
-        blurHorizontally(brightMask, horizontalBlurMask);
-        blurVertically(horizontalBlurMask, blurredMask);
+    private void blurBrightMask(Masks masks) {
+        blurHorizontally(masks.bright, masks.horizontalBlur);
+        blurVertically(masks.horizontalBlur, masks.blurred);
     }
 
     private void blurHorizontally(double[] source, double[] destination) {
@@ -199,7 +201,7 @@ public class FrameBleeder extends FrameProcessor {
         }
     }
 
-    private void applyBleed(ByteBuffer pixels) {
+    private void applyBleed(ByteBuffer pixels, double[] blurredMask) {
         int width = videoInfo.imageWidth();
         int height = videoInfo.imageHeight();
         int channels = videoInfo.imageChannels();
@@ -209,7 +211,7 @@ public class FrameBleeder extends FrameProcessor {
             int rowStart = y * stride;
 
             for (int x = 0; x < width; x++) {
-                double bleedStrength = sampleBlurredMask(x, y);
+                double bleedStrength = sampleBlurredMask(blurredMask, x, y);
                 if (bleedStrength <= 0.0) {
                     continue;
                 }
@@ -226,7 +228,7 @@ public class FrameBleeder extends FrameProcessor {
         }
     }
 
-    private double sampleBlurredMask(int x, int y) {
+    private double sampleBlurredMask(double[] blurredMask, int x, int y) {
         int x0 = xMaskLeft[x];
         int x1 = Math.min(x0 + 1, maskWidth - 1);
         double xBlend = xMaskBlend[x];
@@ -254,5 +256,18 @@ public class FrameBleeder extends FrameProcessor {
 
     private double lerp(double a, double b, double blend) {
         return a + (b - a) * blend;
+    }
+
+    // One thread's working storage for a frame.
+    private static final class Masks {
+        final double[] bright;
+        final double[] horizontalBlur;
+        final double[] blurred;
+
+        Masks(int size) {
+            bright = new double[size];
+            horizontalBlur = new double[size];
+            blurred = new double[size];
+        }
     }
 }

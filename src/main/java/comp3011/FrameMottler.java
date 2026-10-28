@@ -4,7 +4,9 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Made safe for concurrent process() calls: the damage-mask cache is now per thread, and the per-block
+ *        channel scale indices are passed in a call-local array instead of instance fields. Arithmetic unchanged.
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -23,7 +25,7 @@ import org.bytedeco.javacv.Frame;
  * <p>
  * Initialisation builds multi-scale noise fields and colour lookup tables.
  * {@link #process(Frame, InfoFrame)} samples those fields in image blocks and
- * applies the selected channel scales through {@link #applyMottleBlock(ByteBuffer, int, int, int, int, int, int)}.
+ * applies the selected channel scales through {@link #applyMottleBlock(ByteBuffer, int[], int, int, int, int, int, int)}.
  * </p>
  */
 public class FrameMottler extends FrameProcessor {
@@ -58,9 +60,10 @@ public class FrameMottler extends FrameProcessor {
 
     private final int instanceIndex;
     private int mediaSeed;
-    private int cachedDamageMaskSegment = Integer.MIN_VALUE;
-    private double[] damageMaskA;
-    private double[] damageMaskB;
+    // Damage masks change only every DAMAGE_MASK_BLEND_FRAMES frames, so they are cached. The cache is written on a
+    // segment change, which would race between worker threads, so each thread has its own cache. (Frames arrive at
+    // each worker roughly in order, so the per-thread caches still hit almost every time.)
+    private ThreadLocal<DamageMaskCache> damageMaskCachePerThread;
     private int[] xGridLeft;
     private double[] xGridBlend;
     private int[] yGridTop;
@@ -68,9 +71,11 @@ public class FrameMottler extends FrameProcessor {
     private byte[][] scaleLookups;
     private double minimumScale;
     private double maximumScale;
-    private int blockBlueScaleIndex;
-    private int blockGreenScaleIndex;
-    private int blockRedScaleIndex;
+
+    // Positions in the per-call blockScaleIndices array; see mottleFrame.
+    private static final int BLUE = 0;
+    private static final int GREEN = 1;
+    private static final int RED = 2;
 
     public FrameMottler() {
         super();
@@ -83,6 +88,7 @@ public class FrameMottler extends FrameProcessor {
         mediaSeed = saltedMediaSeed(videoInfo.mediaName(), instanceIndex + SEED_SALT);
         buildSamplingLookups();
         buildScaleLookups();
+        damageMaskCachePerThread = ThreadLocal.withInitial(DamageMaskCache::new);
     }
 
     @Override
@@ -107,9 +113,10 @@ public class FrameMottler extends FrameProcessor {
         double[] stainField = buildMultiScaleNoiseField(info.frameNumber(), STAIN_FIELD_SALT);
         int damageMaskSegment = info.frameNumber() / DAMAGE_MASK_BLEND_FRAMES;
         double damageMaskBlend = (info.frameNumber() % DAMAGE_MASK_BLEND_FRAMES) / (double) DAMAGE_MASK_BLEND_FRAMES;
-        ensureDamageMaskFields(damageMaskSegment);
+        DamageMaskCache damageMasks = damageMaskCachePerThread.get();
+        ensureDamageMaskFields(damageMasks, damageMaskSegment);
 
-        mottleFrame(pixels, brightnessField, stainField, damageMaskBlend);
+        mottleFrame(pixels, brightnessField, stainField, damageMasks, damageMaskBlend);
     }
 
     private void buildSamplingLookups() {
@@ -171,14 +178,14 @@ public class FrameMottler extends FrameProcessor {
         }
     }
 
-    private void ensureDamageMaskFields(int segment) {
-        if (segment == cachedDamageMaskSegment) {
+    private void ensureDamageMaskFields(DamageMaskCache cache, int segment) {
+        if (segment == cache.segment) {
             return;
         }
 
-        cachedDamageMaskSegment = segment;
-        damageMaskA = buildNoiseField(segment, DAMAGE_MASK_SALT, DAMAGE_MASK_SMOOTHING_PASSES);
-        damageMaskB = buildNoiseField(segment + 1, DAMAGE_MASK_SALT, DAMAGE_MASK_SMOOTHING_PASSES);
+        cache.segment = segment;
+        cache.maskA = buildNoiseField(segment, DAMAGE_MASK_SALT, DAMAGE_MASK_SMOOTHING_PASSES);
+        cache.maskB = buildNoiseField(segment + 1, DAMAGE_MASK_SALT, DAMAGE_MASK_SMOOTHING_PASSES);
     }
 
     private double[] buildMultiScaleNoiseField(int frameNumber, int fieldSalt) {
@@ -273,11 +280,15 @@ public class FrameMottler extends FrameProcessor {
             ByteBuffer pixels,
             double[] brightnessField,
             double[] stainField,
+            DamageMaskCache damageMasks,
             double damageMaskBlend) {
         int height = videoInfo.imageHeight();
         int width = videoInfo.imageWidth();
         int channels = videoInfo.imageChannels();
         int stride = videoInfo.imageStride();
+        // Per-block blue/green/red scale indices. Previously instance fields; now local to this call so that
+        // concurrent frames cannot overwrite each other's values between "prepare" and "apply".
+        int[] blockScaleIndices = new int[3];
 
         for (int blockY = 0; blockY < height; blockY += EFFECT_BLOCK_SIZE) {
             int blockYEnd = Math.min(blockY + EFFECT_BLOCK_SIZE, height);
@@ -292,12 +303,15 @@ public class FrameMottler extends FrameProcessor {
                         sampleY,
                         brightnessField,
                         stainField,
-                        damageMaskBlend)) {
+                        damageMasks,
+                        damageMaskBlend,
+                        blockScaleIndices)) {
                     continue;
                 }
 
                 applyMottleBlock(
                         pixels,
+                        blockScaleIndices,
                         blockX,
                         blockXEnd,
                         blockY,
@@ -313,8 +327,10 @@ public class FrameMottler extends FrameProcessor {
             int y,
             double[] brightnessField,
             double[] stainField,
-            double damageMaskBlend) {
-        double damageStrength = sampleDamageMask(x, y, damageMaskBlend);
+            DamageMaskCache damageMasks,
+            double damageMaskBlend,
+            int[] blockScaleIndices) {
+        double damageStrength = sampleDamageMask(damageMasks, x, y, damageMaskBlend);
         if (damageStrength <= 0.0) {
             return false;
         }
@@ -322,13 +338,13 @@ public class FrameMottler extends FrameProcessor {
         double brightness = smoothstep(sampleField(brightnessField, x, y));
         double stain = smoothstep(sampleField(stainField, x, y));
 
-        setBlockScaleIndices(brightness, stain, damageStrength);
+        setBlockScaleIndices(brightness, stain, damageStrength, blockScaleIndices);
         return true;
     }
 
-    private double sampleDamageMask(int x, int y, double damageMaskBlend) {
-        double maskA = sampleField(damageMaskA, x, y);
-        double maskB = sampleField(damageMaskB, x, y);
+    private double sampleDamageMask(DamageMaskCache damageMasks, int x, int y, double damageMaskBlend) {
+        double maskA = sampleField(damageMasks.maskA, x, y);
+        double maskB = sampleField(damageMasks.maskB, x, y);
         double mask = smoothstep(lerp(maskA, maskB, damageMaskBlend));
         return smoothstep((mask - DAMAGE_MASK_THRESHOLD) / (1.0 - DAMAGE_MASK_THRESHOLD));
     }
@@ -347,7 +363,8 @@ public class FrameMottler extends FrameProcessor {
         return lerp(top, bottom, yBlend);
     }
 
-    private void setBlockScaleIndices(double brightness, double stain, double damageStrength) {
+    private void setBlockScaleIndices(
+            double brightness, double stain, double damageStrength, int[] blockScaleIndices) {
         double brightnessScale;
         if (brightness < 0.5) {
             brightnessScale = 1.0 - (0.5 - brightness) * 2.0 * MAX_DARKEN_PERCENTAGE / 100.0;
@@ -363,22 +380,23 @@ public class FrameMottler extends FrameProcessor {
         double greenScale = brightnessScale * (1.0 + stainStrength * GREEN_STAIN_BOOST_PERCENTAGE / 100.0);
         double redScale = brightnessScale * (1.0 + stainStrength * RED_STAIN_BOOST_PERCENTAGE / 100.0);
 
-        blockBlueScaleIndex = scaleIndex(blueScale);
-        blockGreenScaleIndex = scaleIndex(greenScale);
-        blockRedScaleIndex = scaleIndex(redScale);
+        blockScaleIndices[BLUE] = scaleIndex(blueScale);
+        blockScaleIndices[GREEN] = scaleIndex(greenScale);
+        blockScaleIndices[RED] = scaleIndex(redScale);
     }
 
     private void applyMottleBlock(
             ByteBuffer pixels,
+            int[] blockScaleIndices,
             int blockX,
             int blockXEnd,
             int blockY,
             int blockYEnd,
             int channels,
             int stride) {
-        byte[] blueLookup = scaleLookups[blockBlueScaleIndex];
-        byte[] greenLookup = scaleLookups[blockGreenScaleIndex];
-        byte[] redLookup = scaleLookups[blockRedScaleIndex];
+        byte[] blueLookup = scaleLookups[blockScaleIndices[BLUE]];
+        byte[] greenLookup = scaleLookups[blockScaleIndices[GREEN]];
+        byte[] redLookup = scaleLookups[blockScaleIndices[RED]];
 
         for (int y = blockY; y < blockYEnd; y++) {
             int rowStart = y * stride;
@@ -413,5 +431,12 @@ public class FrameMottler extends FrameProcessor {
 
     private double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(value, max));
+    }
+
+    // One thread's cached pair of damage masks, valid for the stored segment.
+    private static final class DamageMaskCache {
+        int segment = Integer.MIN_VALUE;
+        double[] maskA;
+        double[] maskB;
     }
 }
