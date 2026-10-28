@@ -1,14 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *  
- *      - Added writeBlocking for use from the dedicated AudioOutput thread; documented thread confinement.
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// handles sound playback separately from frame effects so video processing doesnt block audio output.
 package comp3011;
 
 import java.nio.Buffer;
@@ -27,15 +17,15 @@ import org.bytedeco.javacv.Frame;
  * for the ear to pick up on if/when playback gets laggy.
  *
  * <p>
- * Converts supported packed or planar 16-bit sample buffers to the
- * interleaved, little-endian PCM format required by {@link SourceDataLine}.
- * In the multi-threaded player the {@link AudioOutput} that owns this object decides when audio is written.
+ * Converts supported packed or planar 16 bit sample buffers to the
+ * interleaved, little endian PCM format required by {@link SourceDataLine}.
+ * In the multi threaded player the {@link AudioOutput} that owns this object decides when audio is written.
  * </p>
  *
  * <p>
  * <b>Threading:</b> {@link #copySamples(Frame)} reuses a private conversion buffer and must only ever be called from
  * one thread (the decoder thread). {@link #write}/{@link #writeBlocking} are called from one other thread (the audio
- * thread), and {@link #flush()} may be called from any thread - Java Sound lines support flushing while another
+ * thread), and {@link #flush()} may be called from any thread   Java Sound lines support flushing while another
  * thread is writing, which makes the blocked write return early.
  * </p>
  */
@@ -43,7 +33,7 @@ public class AudioPlayer implements AutoCloseable {
     private static final long WRITE_TRACE_THRESHOLD_NS = 2_000_000L;
     private static final int AUDIO_WARMUP_BYTES = 4096;
 
-    private volatile SourceDataLine line; // Java Sound's audio-output interface - for us a destination, not a source.
+    private volatile SourceDataLine line; // Java Sounds audio output interface   for us a destination, not a source.
     private byte[] outputBuffer = new byte[0];
 
     public void open(int sampleRate, int channels) throws LineUnavailableException {
@@ -81,7 +71,7 @@ public class AudioPlayer implements AutoCloseable {
         // Try and avoid blocking writes to the audio stream by only adding equal or less than the number of bytes
         // available. We return only the bytes we were able to write without overflowing the buffer, so the remaining
         // bytes can be tracked and written later. This avoids audio buffer blocking in a cooperative multitasking
-        // architecture - i.e. we are being cooperative and not stalling the thread on line.write below!
+        // architecture   i.e. we are being cooperative and not stalling the thread on line.write below!
         int availableBeforeWrite = line.available();
         int byteCount = Math.min(length, availableBeforeWrite);
         if (byteCount <= 0) {
@@ -92,7 +82,7 @@ public class AudioPlayer implements AutoCloseable {
         int written = line.write(samples, offset, byteCount); // Will block if we get it wrong.
         long elapsedNs = System.nanoTime() - startNs;
         if (elapsedNs >= WRITE_TRACE_THRESHOLD_NS) {
-            // Hopefully you'll never see this.
+            // Hopefully youll never see this.
             System.out.printf(
                     "WARNING: Audio write blocked for %dus writing %d bytes, line available before write: %d bytes%n",
                     elapsedNs / 1000,
@@ -104,7 +94,7 @@ public class AudioPlayer implements AutoCloseable {
 
     /**
      * Writes to the sound device, blocking while its buffer is full. Only appropriate on a thread dedicated to audio
-     * (see {@link AudioOutput}); the single threaded model must use the non-blocking {@link #write} instead.
+     * (see {@link AudioOutput}); the single threaded model must use the non blocking {@link #write} instead.
      *
      * @return bytes written, which may be fewer than requested if the line is flushed or closed meanwhile
      */
@@ -132,18 +122,18 @@ public class AudioPlayer implements AutoCloseable {
         }
     }
 
-    // Why do we have this? Some (many) audio output systems have a long 'wake up' delay before they output the first
+    // Why do we have this? Some (many) audio output systems have a long wake up delay before they output the first
     // audio. This is not great for real time playback of audio that is synched with video frames. It can lead to a
     // noticeable lag between the vision and the audio. This method writes a bunch of silence into the audio system
     // then flushes it out as soon as it is written to get any wake up lag out of the way, so that it is hopefully ready
     // for real time output when the real audio bytes start showing up.
     private void warmUpLine() {
-        byte[] silence = new byte[Math.min(AUDIO_WARMUP_BYTES, line.getBufferSize())]; // All zeros.
+        byte[] silence = new byte[Math.min(AUDIO_WARMUP_BYTES, line.getBufferSize())]; // all zeros.
         line.write(silence, 0, silence.length); // May play, but harmless.
         line.flush(); // Get rid of the rest straight away, hopefully warm up is done.
     }
 
-    // This is a little tedious but handles channel interleaved stereo audio (normal) and also 'packed' audio where
+    // this is tedious but handles channel interleaved stereo audio (normal) and also packed audio where
     // there is a chunk of left speaker followed by a chunk of right speaker (unusual, and needs conversion).
     private int copySamplesToOutputBuffer(Frame frame) {
         Buffer[] samples = frame.samples;
@@ -203,3 +193,4 @@ public class AudioPlayer implements AutoCloseable {
     }
 
 }
+

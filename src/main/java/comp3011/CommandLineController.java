@@ -1,17 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- *
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
- *      - Spec Part 1: frame processor options (long, short and stacked short forms), applied in command-line
- *        order and repeatable; help text extended exactly as specified.
- *      - Parsing split into small single-purpose methods; output stream injectable for regression testing.
- *      - Hidden, out-of-spec --single-threaded switch selecting the original reference playback model.
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// parses launch options and retains the effect order, including repeated options, so the processing sequence matches what the user requested.
 package comp3011;
 
 import java.io.File;
@@ -22,7 +9,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Created in the VideoPlayerApp's main function to receive and parse the video player's command-line arguments.
+ * Created in the VideoPlayerApps main function to receive and parse the video players command line arguments.
  *
  * <p>
  * Extracts the video file and supported launch options, reports invalid input
@@ -31,21 +18,21 @@ import java.util.Optional;
  * </p>
  *
  * <p>
- * Command-line conventions supported:
+ * Command line conventions supported:
  * </p>
  * <ul>
- * <li>Every option has a short form ({@code -d}) and a long form ({@code --dust-frames}).</li>
- * <li>Short forms may be stacked behind a single dash ({@code -jfddn}) and mixed freely with long forms.</li>
- * <li>Options and the video file may appear in any order, e.g. {@code -j movie.mp4 -fd}.</li>
+ * <li>Every option has a short form ({@code  d}) and a long form ({@code   dust frames}).</li>
+ * <li>Short forms may be stacked behind a single dash ({@code  jfddn}) and mixed freely with long forms.</li>
+ * <li>Options and the video file may appear in any order, e.g. {@code  j movie.mp4  fd}.</li>
  * <li>Frame processor options are collected in the order given, including repeats, because effects are applied in
- * command-line order and repeating an effect stacks (intensifies) it. The table of available effects lives in
+ * command line order and repeating an effect stacks (intensifies) it. The table of available effects lives in
  * {@link FrameProcessorOption}; this class only deals with turning text into that ordered list.</li>
  * </ul>
  *
  * <p>
- * Out-of-spec options for testing/configuration are deliberately <b>not</b> shown in the help text (TITAN checks the
+ * Out of spec options for testing/configuration are deliberately <b>not</b> shown in the help text (TITAN checks the
  * help letter for letter). There is currently one: {@value #SINGLE_THREADED_FLAG} plays using the original single
- * threaded reference model, for side-by-side performance and correctness comparison.
+ * threaded reference model, for side by side performance and correctness comparison.
  * </p>
  */
 public class CommandLineController {
@@ -70,7 +57,7 @@ public class CommandLineController {
         this(args, System.out);
     }
 
-    // Lets tests capture what would have been printed to the console.
+    // lets tests capture what would have been printed to the console.
     CommandLineController(String[] args, PrintStream out) {
         this.args = args.clone();
         this.out = out;
@@ -111,7 +98,7 @@ public class CommandLineController {
         return singleThreadedRequested;
     }
 
-    /** The requested effects in command-line order, repeats included. */
+    /** The requested effects in command line order, repeats included. */
     public List<FrameProcessorOption> getFrameProcessorOptions() {
         return Collections.unmodifiableList(frameProcessorOptions);
     }
@@ -120,7 +107,7 @@ public class CommandLineController {
         return errorMessage == null && videoFile != null;
     }
 
-    /** The complete help text exactly as printed by {@code --help}, one line per element. */
+    /** The complete help text exactly as printed by {@code   help}, one line per element. */
     static List<String> helpLines() {
         List<String> lines = new ArrayList<>();
         lines.add(USAGE);
@@ -191,8 +178,8 @@ public class CommandLineController {
         }
     }
 
-    // A single-dash argument is one or more short flags stacked together, e.g. "-a" or "-jfddn". Each letter is
-    // handled exactly as if it had been given on its own, left to right, so "-jf" is identical to "-j -f".
+    // A single dash argument is one or more short flags stacked together, e.g. " a" or " jfddn". Each letter is
+    // handled exactly as if it had been given on its own, left to right, so " jf" is identical to " j  f".
     private void parseShortOptions(String arg) {
         for (int i = 1; i < arg.length(); i++) {
             parseShortOption(arg.charAt(i));
