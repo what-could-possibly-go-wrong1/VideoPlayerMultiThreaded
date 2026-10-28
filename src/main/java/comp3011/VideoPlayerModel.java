@@ -1,18 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- *
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
- *      - Re-engineered as the multi-threaded model. The original single threaded implementation now lives,
- *        unchanged in behaviour, in SingleThreadedVideoPlayerModel. Public behaviour (seeking rules, pause,
- *        start over, end of playback, audio toggling, status messages) is preserved from the original; decoding,
- *        effects and audio output have moved to PlaybackSession's threads, leaving this class to coordinate them
- *        and display frames on the JavaFX application thread.
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// STUDY COPY - same logic as VideoPlayerModel.java, just scruffier. neat one goes to gradescope
 package comp3011;
 
 import java.io.File;
@@ -25,70 +11,56 @@ import java.util.function.Consumer;
 import javafx.animation.AnimationTimer;
 import javafx.scene.image.Image;
 
-/**
- * The model part of the video player model-view-controller architecture: the multi-threaded player.
+/*
+ * the MT player's "coordinator". lives ONLY on the javafx thread.
+ *   - gets user commands from the controller (play/pause/seek/...)
+ *   - owns the PlaybackClock + at most 1 PlaybackSession (= the decoder/worker/audio threads)
+ *   - per frame job = pump(): every javafx heartbeat, show the next frame IF its done + due. thats it.
+ *   - nothing heavy happens here -> GUI stays snappy however many effects
  *
- * <p>
- * This class is the <b>coordinator</b>. It lives entirely on the JavaFX application thread: it receives user
- * commands from the {@link VideoPlayerController}, owns the {@link PlaybackClock}, and owns at most one
- * {@link PlaybackSession} - the bundle of threads that decode, apply effects and play sound. Its only per-frame
- * job is {@link #pumpPlayback(long)}: on each JavaFX heartbeat, put the next frame on screen if it is finished and
- * due. Everything expensive happens elsewhere, so the GUI stays responsive no matter how many effects are stacked.
- * See {@link PlaybackSession} for a diagram of the threads.
- * </p>
- *
- * <h2>Concurrency notes</h2>
- * <ul>
- * <li>All fields except {@link #audioOutputEnabled} are confined to the JavaFX thread, so need no locking.</li>
- * <li>{@link #audioOutputEnabled} is read by the decoder and audio threads, so it is {@code volatile}.</li>
- * <li>Cross-thread data flows only through thread-safe hand-offs: the session's blocking presentation queue,
- * {@link java.util.concurrent.CompletableFuture}s for processed frames, and the synchronised clock.</li>
- * <li>Seeks never wait for in-flight work. Instead a new <i>epoch</i> begins, and frames or audio from older
- * epochs are recognised and discarded wherever they turn up (see {@link VideoDecoder}).</li>
- * <li>Every frame stays on screen for a full frame period: if processing ever falls behind, the clock slips
- * rather than rushing through the backlog (which would make frames flash past unseen), and playback only starts
- * once a first batch of frames is ready (pre-roll).</li>
- * <li>Frames are displayed strictly in decode order, one at a time, so frame correctness does not depend on which
- * worker finishes first.</li>
- * </ul>
+ * concurrency notes:
+ *   - everything here is javafx-thread only (no locks needed)... EXCEPT audioOn, which decoder + audio threads
+ *     read -> volatile
+ *   - data crosses threads only thru safe hand-offs: the session's blocking queue, CompletableFutures, sync'd clock
+ *   - seeks never wait. new EPOCH starts, anything from older epochs gets binned wherever it shows up
+ *   - every frame gets a FULL frame period on screen: fall behind -> clock slips (dont rush = no flashing frames).
+ *     + playback only starts once a batch of frames is ready (pre-roll)
+ *   - frames shown strictly in decode order, 1 at a time -> doesnt matter which worker finishes first
  */
 public class VideoPlayerModel implements PlaybackModel {
-    private static final long NO_SEEK_REQUEST = -1; // Sentinel value used when no seek position is active.
-    private static final long FIVE_SECONDS_US = 5_000_000L;
-    // Longest we wait for the pre-roll (see prerollComplete) before starting playback anyway.
-    private static final long MAX_PREROLL_WAIT_NS = 2_000_000_000L;
+    static final long NONE = -1;                    // "no seek position" marker
+    static final long FIVE_SEC_US = 5_000_000L;
+    static final long PREROLL_GIVE_UP_NS = 2_000_000_000L;   // wait max 2s for pre-roll then just go
+    static final int PREROLL_BATCHES = 2;           // frames per worker that must be ready before we start
 
-    private final List<FrameProcessor> frameProcessors;
-    private final int workerCount;
-    private final PlaybackClock clock = new PlaybackClock();
-    private final BiConsumer<Integer, Integer> videoSizeChangedHandler;
-    private final Consumer<Image> frameReadyHandler;
-    private final Consumer<String> statusChangedHandler;
-    private final BiConsumer<Boolean, Boolean> playbackStateChangedHandler;
-    private final Consumer<Boolean> audioOutputStateChangedHandler;
+    final List<FrameProcessor> effects;
+    final int workers;
+    final PlaybackClock clock = new PlaybackClock();
+    final BiConsumer<Integer, Integer> onVideoSize;
+    final Consumer<Image> onFrame;
+    final Consumer<String> onStatus;
+    final BiConsumer<Boolean, Boolean> onPlayState;
+    final Consumer<Boolean> onAudioState;
 
-    // The JavaFX heartbeat, as in the original: calls pumpPlayback once per pulse (typically 60 times a second).
-    private final AnimationTimer playbackTimer = new AnimationTimer() {
-        @Override
-        public void handle(long now) {
-            pumpPlayback(now);
-        }
+    // javafx heartbeat (~60/sec), same as the original. calls pump() each pulse
+    final AnimationTimer timer = new AnimationTimer() {
+        @Override public void handle(long now) { pump(now); }
     };
 
-    private File videoFile; // Path to the media that comes from the command line
-    private PlaybackSession session; // The threads and resources of the current playback, or null.
-    private boolean playbackOpen; // True when playback is happening.
-    private boolean pauseRequested;
-    private volatile boolean audioOutputEnabled; // Read by decoder and audio threads.
-    private long epoch; // Increments on every (re)start or seek; see PlaybackClock.
-    private long currentTimestampUs;
-    private long videoDurationUs = NO_SEEK_REQUEST;
-    private int videoFrameDurationUs;
-    private int intFrameRate;
-    private long logicalPlaybackBaseUs;
-    private long epochFirstMediaUs; // Media timestamp of the first frame shown in the current epoch.
-    private long epochStartedNs; // When the current epoch began, for the pre-roll time limit.
-    private long relativeSeekBaseUs = NO_SEEK_REQUEST;
+    File file;                  // from the command line
+    PlaybackSession session;    // threads + resources of current playback, or null
+    boolean open;               // playing?
+    boolean paused;
+    volatile boolean audioOn;   // read by decoder + audio threads!!
+    long epoch;                 // ++ on every start/seek
+    long posUs;                 // current position
+    long durationUs = NONE;
+    int frameDurUs;
+    int fps;
+    long baseUs;                // logical position the current epoch started at
+    long firstMediaUs;          // media ts of the 1st frame shown this epoch
+    long epochStartNs;          // when this epoch began (for pre-roll timeout)
+    long relSeekBaseUs = NONE;
 
     public VideoPlayerModel(
             boolean audioEnabled,
@@ -97,380 +69,251 @@ public class VideoPlayerModel implements PlaybackModel {
             Consumer<Image> frameReadyHandler,
             Consumer<String> statusChangedHandler,
             BiConsumer<Boolean, Boolean> playbackStateChangedHandler,
-            Consumer<Boolean> audioOutputStateChangedHandler) {
-        audioOutputEnabled = audioEnabled;
-        this.videoSizeChangedHandler = videoSizeChangedHandler;
-        this.frameReadyHandler = frameReadyHandler;
-        this.statusChangedHandler = statusChangedHandler;
-        this.playbackStateChangedHandler = playbackStateChangedHandler;
-        this.audioOutputStateChangedHandler = audioOutputStateChangedHandler;
-        // Effects are constructed here, once, on this single thread and in command-line order (see
-        // FrameProcessorOption.instantiate for why the order and the single thread matter). They are shared by
-        // every worker thread of every playback session.
-        this.frameProcessors = FrameProcessorOption.instantiate(frameProcessorOptions);
-        this.workerCount = FrameProcessingPipeline.defaultWorkerCount();
+            Consumer<Boolean> audioOutputStateChangedHandler)
+    {
+        audioOn = audioEnabled;
+        onVideoSize = videoSizeChangedHandler; onFrame = frameReadyHandler; onStatus = statusChangedHandler;
+        onPlayState = playbackStateChangedHandler; onAudioState = audioOutputStateChangedHandler;
+        // build effects ONCE, on THIS thread, in cmd line order (order + 1 thread matter, see
+        // FrameProcessorOption.instantiate). shared by every worker of every session
+        effects = FrameProcessorOption.instantiate(frameProcessorOptions);
+        workers = FrameProcessingPipeline.defaultWorkerCount();
+        // we're on the javafx thread + toolkit is up -> good moment to bump the drawing threads' priority
+        DisplayThreadPriority.boostDisplayThreads();
     }
 
-    @Override
-    public void play(File file) {
-        videoFile = file;
-        videoDurationUs = NO_SEEK_REQUEST;
-        videoFrameDurationUs = 0;
-        startPlayback(0, false, NO_SEEK_REQUEST);
+    @Override public void play(File f) {
+        file = f;
+        durationUs = NONE;
+        frameDurUs = 0;
+        startPlayback(0, false, NONE);
     }
 
-    @Override
-    public void startOver() {
-        if (videoFile == null) {
-            return;
-        }
-
-        seekTo(0);
-    }
-
-    @Override
-    public void backFiveSeconds() {
-        seekRelative(-FIVE_SECONDS_US);
-    }
-
-    @Override
-    public void forwardFiveSeconds() {
-        seekRelative(FIVE_SECONDS_US);
-    }
+    @Override public void startOver() { if (file != null) seekTo(0); }
+    @Override public void backFiveSeconds() { seekBy(-FIVE_SEC_US); }
+    @Override public void forwardFiveSeconds() { seekBy(FIVE_SEC_US); }
 
     @Override
     public void togglePause() {
-        if (!playbackOpen) {
-            if (videoFile != null) {
-                startPlayback(displayableSeekTimestamp(currentTimestampUs), false, currentTimestampUs);
-            }
+        if (!open) {   // finished/stopped -> pressing play restarts from where we were
+            if (file != null) startPlayback(displayable(posUs), false, posUs);
             return;
         }
-
-        pauseRequested = !pauseRequested;
-        relativeSeekBaseUs = NO_SEEK_REQUEST;
+        paused = !paused;
+        relSeekBaseUs = NONE;
 
         long now = System.nanoTime();
-        if (pauseRequested) {
-            clock.pause(now);
-            session.flushAudioDevice();
-        } else {
-            clock.resume(now);
-        }
+        if (paused) { clock.pause(now); session.flushAudioDevice(); }   // silence NOW, keep queued sound
+        else clock.resume(now);
 
-        notifyPlaybackStateChanged();
+        tellPlayState();
     }
 
     @Override
     public void toggleAudioOutput() {
-        audioOutputEnabled = !audioOutputEnabled;
-        if (session != null) {
-            session.flushAudio();
-        }
-        notifyAudioOutputStateChanged();
+        audioOn = !audioOn;
+        if (session != null) session.flushAudio();
+        onAudioState.accept(audioOn);
     }
 
-    @Override
-    public boolean isAudioOutputEnabled() {
-        return audioOutputEnabled;
-    }
+    @Override public boolean isAudioOutputEnabled() { return audioOn; }
 
     @Override
     public void stopPlayback() {
-        closePlaybackResources();
-        currentTimestampUs = 0;
-        pauseRequested = false;
-        notifyStatusChanged("Stopped");
-        notifyFrameReady(null);
-        notifyPlaybackStateChanged();
+        closeSession();
+        posUs = 0;
+        paused = false;
+        onStatus.accept("Stopped");
+        onFrame.accept(null);
+        tellPlayState();
     }
 
-    @Override
-    public void shutdown() {
-        closePlaybackResources();
+    @Override public void shutdown() { closeSession(); }
+
+    void seekBy(long deltaUs) {
+        if (file == null) return;
+        long base = relSeekBaseUs != NONE ? relSeekBaseUs : posUs;   // so pressing -> -> -> stacks up properly
+        seekTo(base + deltaUs);
     }
 
-    private void seekRelative(long offsetUs) {
-        if (videoFile == null) {
-            return;
-        }
+    void seekTo(long tsUs) {
+        long logical = clamp(tsUs);
+        long grabAt = displayable(logical);
 
-        long baseTimestampUs = relativeSeekBaseUs != NO_SEEK_REQUEST
-                ? relativeSeekBaseUs
-                : currentTimestampUs;
-        seekTo(baseTimestampUs + offsetUs);
+        if (!open) { startPlayback(grabAt, paused, logical); return; }
+
+        newEpoch(logical);
+        session.seek(epoch, grabAt);   // decoder deals w/ it on its own thread
+        tellPlayState();
     }
 
-    private void seekTo(long timestampUs) {
-        long logicalTimestampUs = clampSeekTimestamp(timestampUs);
-        long grabTimestampUs = displayableSeekTimestamp(logicalTimestampUs);
+    void startPlayback(long startUs, boolean startPaused, long initialRelBaseUs)
+    {
+        closeSession();
 
-        if (!playbackOpen) {
-            startPlayback(grabTimestampUs, pauseRequested, logicalTimestampUs);
-            return;
-        }
-
-        beginEpoch(logicalTimestampUs);
-        session.seek(epoch, grabTimestampUs);
-        notifyPlaybackStateChanged();
-    }
-
-    private void startPlayback(long startTimestampUs, boolean initiallyPaused, long initialRelativeSeekBaseUs) {
-        closePlaybackResources();
-
-        pauseRequested = initiallyPaused;
+        paused = startPaused;
         long now = System.nanoTime();
-        if (pauseRequested) {
-            clock.pause(now);
-        } else {
-            clock.resume(now);
-        }
+        if (paused) clock.pause(now); else clock.resume(now);
 
-        long logicalStartUs = initialRelativeSeekBaseUs != NO_SEEK_REQUEST
-                ? initialRelativeSeekBaseUs
-                : startTimestampUs;
-        beginEpoch(logicalStartUs);
-        relativeSeekBaseUs = initialRelativeSeekBaseUs;
+        newEpoch(initialRelBaseUs != NONE ? initialRelBaseUs : startUs);
+        relSeekBaseUs = initialRelBaseUs;
 
-        notifyStatusChanged(videoFile.getName());
+        onStatus.accept(file.getName());
 
         try {
-            session = PlaybackSession.open(
-                    videoFile,
-                    startTimestampUs,
-                    frameProcessors,
-                    workerCount,
-                    clock,
-                    epoch,
-                    () -> audioOutputEnabled);
-            readMediaProperties(session);
-            notifyVideoSizeChanged(session.imageWidth(), session.imageHeight());
+            session = PlaybackSession.open(file, startUs, effects, workers, clock, epoch, () -> audioOn);
+            readMedia(session);
+            onVideoSize.accept(session.imageWidth(), session.imageHeight());
             session.start();
-            playbackOpen = true;
-            playbackTimer.start();
-            notifyPlaybackStateChanged();
+            open = true;
+            timer.start();
+            tellPlayState();
         } catch (Exception e) {
-            handlePlaybackError(e);
+            fail(e);
         }
     }
 
-    private void readMediaProperties(PlaybackSession openedSession) {
-        double frameRate = openedSession.frameRate();
-        intFrameRate = (int) Math.round(frameRate);
-        videoFrameDurationUs = openedSession.frameDurationUs();
-        long durationUs = openedSession.durationUs();
-        videoDurationUs = durationUs > 0
-                ? durationUs
-                : NO_SEEK_REQUEST;
+    void readMedia(PlaybackSession s) {
+        fps = (int) Math.round(s.frameRate());
+        frameDurUs = s.frameDurationUs();
+        long d = s.durationUs();
+        durationUs = d > 0 ? d : NONE;
     }
 
-    // Starts a new epoch at the given logical position: the clock stops until the first frame of the new epoch
-    // is ready, and anything still in flight from earlier epochs will be discarded.
-    private void beginEpoch(long logicalTimestampUs) {
+    // new epoch at this logical position: clock stops till 1st frame of the new epoch is ready,
+    // + anything still in flight from older epochs gets binned
+    void newEpoch(long logicalUs) {
         epoch++;
         clock.reset(epoch);
-        currentTimestampUs = logicalTimestampUs;
-        relativeSeekBaseUs = logicalTimestampUs;
-        logicalPlaybackBaseUs = logicalTimestampUs;
-        epochStartedNs = System.nanoTime();
+        posUs = logicalUs;
+        relSeekBaseUs = logicalUs;
+        baseUs = logicalUs;
+        epochStartNs = System.nanoTime();
     }
 
-    // Called on every JavaFX heartbeat. Unlike the single threaded model this never decodes or processes - it only
-    // looks at the head of the presentation queue, so it always returns control to the GUI within microseconds.
-    // Frames are taken strictly in decode order; at most one is shown per heartbeat.
-    private void pumpPlayback(long now) {
-        if (!playbackOpen) {
-            return;
-        }
+    // every javafx heartbeat. NEVER decodes/processes - just peeks at the head of the queue -> back to the GUI in
+    // microseconds. strictly decode order, max 1 frame per heartbeat
+    void pump(long now) {
+        if (!open) return;
 
-        BlockingQueue<VideoDecoder.PresentationItem<Image>> queue = session.presentationQueue();
-        VideoDecoder.PresentationItem<Image> head = queue.peek();
-        while (head != null && head.epoch() != epoch) {
-            queue.poll(); // Left over from before a seek.
-            head = queue.peek();
-        }
-        if (head == null) {
-            return; // Decoder has not caught up yet (e.g. just after a seek).
-        }
+        BlockingQueue<VideoDecoder.PresentationItem<Image>> q = session.presentationQueue();
+        VideoDecoder.PresentationItem<Image> head = q.peek();
+        while (head != null && head.epoch() != epoch) { q.poll(); head = q.peek(); }   // leftovers from before a seek
+        if (head == null) return;   // decoder hasnt caught up yet (eg just after a seek)
 
         switch (head) {
-            case VideoDecoder.EndOfStream<Image> _ -> {
-                queue.poll();
-                finishPlayback();
-            }
-            case VideoDecoder.DecodeFailure<Image> failure -> handlePlaybackError(failure.error());
-            case VideoDecoder.DecodedFrame<Image> frame -> presentIfDue(queue, frame, now);
+            case VideoDecoder.EndOfStream<Image> _ -> { q.poll(); finished(); }
+            case VideoDecoder.DecodeFailure<Image> f -> fail(f.error());
+            case VideoDecoder.DecodedFrame<Image> fr -> showIfDue(q, fr, now);
         }
     }
 
-    private void presentIfDue(
-            BlockingQueue<VideoDecoder.PresentationItem<Image>> queue,
-            VideoDecoder.DecodedFrame<Image> frame,
-            long now) {
-        if (!frame.processed().isDone()) {
-            return; // Its effects are still being applied; it will be shown (late) on a following heartbeat.
-        }
+    void showIfDue(BlockingQueue<VideoDecoder.PresentationItem<Image>> q, VideoDecoder.DecodedFrame<Image> fr, long now)
+    {
+        if (!fr.processed().isDone()) return;   // effects still running -> show it (late) next heartbeat
 
         if (!clock.isStarted()) {
-            // First frame since start/seek. When paused, show it straight away, as the original did. Otherwise wait
-            // for the pre-roll, then anchor the clock so this frame is due right now and later frames follow it.
-            if (!pauseRequested && !prerollComplete(queue, now)) {
-                return;
-            }
-            epochFirstMediaUs = frame.mediaTimestampUs();
-            clock.startAt(frame.mediaTimestampUs(), now);
-        } else if (!clock.isDue(frame.mediaTimestampUs(), now)) {
+            // 1st frame since start/seek. paused -> show straight away (like the original).
+            // otherwise wait for pre-roll, then anchor the clock so THIS frame is due now
+            if (!paused && !prerollDone(q, now)) return;
+            firstMediaUs = fr.mediaTimestampUs();
+            clock.startAt(fr.mediaTimestampUs(), now);
+        } else if (!clock.isDue(fr.mediaTimestampUs(), now)) {
             return;
         } else {
-            slipIfLate(frame, now);
+            slipIfLate(fr, now);
         }
 
-        queue.poll();
-        FrameProcessingPipeline.ProcessedFrame<Image> processed;
+        q.poll();
+        FrameProcessingPipeline.ProcessedFrame<Image> done;
         try {
-            processed = frame.processed().join();
+            done = fr.processed().join();
         } catch (CompletionException e) {
-            handlePlaybackError(e.getCause() instanceof Exception cause ? cause : e);
+            fail(e.getCause() instanceof Exception c ? c : e);
             return;
         }
-        if (processed != null) {
-            displayFrame(frame, processed);
-        }
+        if (done != null) show(fr, done);   // null = skipped cos it went stale
     }
 
-    // Pre-roll: start the clock only once the first batch of frames - one per worker - is ready, not just the first
-    // frame. The workers process that batch in parallel so it costs almost no extra start-up time, but it gives the
-    // display a cushion: otherwise frame 2 is usually due before its worker has finished it. Gives up waiting after
-    // MAX_PREROLL_WAIT_NS, or when the queue holds the end of the media.
-    private boolean prerollComplete(BlockingQueue<VideoDecoder.PresentationItem<Image>> queue, long now) {
-        if (now - epochStartedNs > MAX_PREROLL_WAIT_NS) {
-            return true;
-        }
-        int wanted = Math.min(workerCount, queue.size() + queue.remainingCapacity());
+    // PRE-ROLL: dont start the clock on frame 1 alone - wait till PREROLL_BATCHES x workers frames are ready.
+    // each batch runs in parallel so it costs a fraction of a second, but cushions a slow start (busy machine,
+    // cold JIT) so the first frames arent due before their workers finish them.
+    // give up after 2s, or if end-of-media is already queued
+    boolean prerollDone(BlockingQueue<VideoDecoder.PresentationItem<Image>> q, long now) {
+        if (now - epochStartNs > PREROLL_GIVE_UP_NS) return true;
+        int want = Math.min(workers * PREROLL_BATCHES, q.size() + q.remainingCapacity());
         int ready = 0;
-        for (VideoDecoder.PresentationItem<Image> item : queue) { // Weakly consistent iteration: thread-safe.
-            if (item.epoch() != epoch) {
-                continue;
-            }
-            if (!(item instanceof VideoDecoder.DecodedFrame<Image> frame)) {
-                return true; // End of media (or an error) is already queued: nothing more to wait for.
-            }
-            if (!frame.processed().isDone()) {
-                break;
-            }
-            if (++ready >= wanted) {
-                return true;
-            }
+        for (VideoDecoder.PresentationItem<Image> it : q) {   // weakly consistent iteration = thread safe
+            if (it.epoch() != epoch) continue;
+            if (!(it instanceof VideoDecoder.DecodedFrame<Image> fr)) return true;   // EOS/error queued, nothing to wait for
+            if (!fr.processed().isDone()) break;
+            if (++ready >= want) return true;
         }
         return false;
     }
 
-    // A frame shown later than its slot must still stay on screen for a full frame period. If we instead raced
-    // through the backlog to catch up, the frames behind it would each flash up for a single screen refresh and,
-    // to a viewer (or a screen-capturing test), be dropped. So when we are more than half a frame late, the clock
-    // slips back by the lateness: playback is momentarily delayed but every frame is shown properly. (Lateness under
-    // half a frame is normal: frames can only change on a screen refresh, which at 60Hz is every 16.7ms.)
-    private void slipIfLate(VideoDecoder.DecodedFrame<Image> frame, long now) {
-        long frameDurationNs = videoFrameDurationUs * 1_000L;
-        long lateNs = now - clock.targetTimeNs(frame.mediaTimestampUs());
-        if (frameDurationNs > 0 && lateNs > frameDurationNs / 2) {
-            clock.delay(lateNs);
-        }
+    // SLIP DONT RUSH. a late frame still gets a full frame period on screen. racing thru the backlog would flash
+    // each frame for 1 refresh (16.7ms) = looks dropped (+ titan's screen capture counts it as missed).
+    // so > half a frame late -> push the whole schedule back by the lateness.
+    // (< half a frame late is normal - frames can only change on a 60Hz refresh)
+    void slipIfLate(VideoDecoder.DecodedFrame<Image> fr, long now) {
+        long frameNs = frameDurUs * 1_000L;
+        long lateNs = now - clock.targetTimeNs(fr.mediaTimestampUs());
+        if (frameNs > 0 && lateNs > frameNs / 2) clock.delay(lateNs);
     }
 
-    private void displayFrame(
-            VideoDecoder.DecodedFrame<Image> frame,
-            FrameProcessingPipeline.ProcessedFrame<Image> processed) {
-        currentTimestampUs = logicalPlaybackBaseUs + Math.max(0, frame.mediaTimestampUs() - epochFirstMediaUs);
-        relativeSeekBaseUs = NO_SEEK_REQUEST;
+    void show(VideoDecoder.DecodedFrame<Image> fr, FrameProcessingPipeline.ProcessedFrame<Image> done) {
+        posUs = baseUs + Math.max(0, fr.mediaTimestampUs() - firstMediaUs);
+        relSeekBaseUs = NONE;
 
-        // Dump some logging to the console once per second so that real time performance can be monitored. As in
-        // the original, headroom is how long before its display deadline the frame was ready. Because frames are now
-        // processed ahead of time this can exceed one frame period - the buffered count shows how far ahead.
-        if (intFrameRate > 0 && frame.frameNumber() % intFrameRate == 0) {
-            long remainingUs = (clock.targetTimeNs(frame.mediaTimestampUs()) - processed.readyAtNs()) / 1_000L;
-            String colour = remainingUs < 0 ? "\u001B[31m" : "\u001B[32m";
+        // once a sec: headroom = how long before its deadline the frame was ready. can be > 1 frame now cos we
+        // work ahead (buffered count shows how far)
+        if (fps > 0 && fr.frameNumber() % fps == 0) {
+            long spareUs = (clock.targetTimeNs(fr.mediaTimestampUs()) - done.readyAtNs()) / 1_000L;
+            String col = spareUs < 0 ? "\u001B[31m" : "\u001B[32m";
             System.out.printf("Frame headroom is %s%5dus\u001B[0m out of %dus spare. %d frames buffered on %d threads.%n",
-                    colour,
-                    remainingUs,
-                    videoFrameDurationUs,
-                    session.bufferedFrameCount(),
-                    workerCount);
+                    col, spareUs, frameDurUs, session.bufferedFrameCount(), workers);
         }
-
-        notifyFrameReady(processed.output());
+        onFrame.accept(done.output());
     }
 
-    private void finishPlayback() {
-        long endTimestampUs = videoDurationUs != NO_SEEK_REQUEST
-                ? videoDurationUs
-                : currentTimestampUs;
-
-        closePlaybackResources();
-        pauseRequested = true;
-        currentTimestampUs = endTimestampUs;
-        relativeSeekBaseUs = endTimestampUs;
-        notifyStatusChanged("Playback finished");
-        notifyPlaybackStateChanged();
+    void finished() {
+        long endUs = durationUs != NONE ? durationUs : posUs;
+        closeSession();
+        paused = true;
+        posUs = endUs;
+        relSeekBaseUs = endUs;
+        onStatus.accept("Playback finished");
+        tellPlayState();
     }
 
-    private void handlePlaybackError(Exception e) {
+    void fail(Exception e) {
         e.printStackTrace();
-        closePlaybackResources();
-        pauseRequested = false;
-        notifyStatusChanged("Error: " + e.getMessage());
-        notifyPlaybackStateChanged();
+        closeSession();
+        paused = false;
+        onStatus.accept("Error: " + e.getMessage());
+        tellPlayState();
     }
 
-    private void closePlaybackResources() {
-        playbackTimer.stop();
-        playbackOpen = false;
-        if (session != null) {
-            session.close(); // Joins the session's threads before returning.
-            session = null;
-        }
+    void closeSession() {
+        timer.stop();
+        open = false;
+        if (session != null) { session.close(); session = null; }   // close() JOINS the threads before returning
     }
 
-    private long clampSeekTimestamp(long timestampUs) {
-        long clampedTimestampUs = Math.max(0, timestampUs);
-        long durationUs = videoDurationUs;
-        if (durationUs != NO_SEEK_REQUEST) {
-            clampedTimestampUs = Math.min(clampedTimestampUs, durationUs);
-        }
-        return clampedTimestampUs;
+    long clamp(long tsUs) {
+        long c = Math.max(0, tsUs);
+        if (durationUs != NONE) c = Math.min(c, durationUs);
+        return c;
     }
 
-    private long displayableSeekTimestamp(long logicalTimestampUs) {
-        long durationUs = videoDurationUs;
-        if (durationUs == NO_SEEK_REQUEST || logicalTimestampUs < durationUs) {
-            return logicalTimestampUs;
-        }
-
-        int frameDurationUs = videoFrameDurationUs;
-        if (frameDurationUs <= 0) {
-            return Math.max(0, durationUs - 1);
-        }
-
-        return Math.max(0, durationUs - frameDurationUs);
+    // seeking to the very end -> back off one frame so theres something to show
+    long displayable(long logicalUs) {
+        long d = durationUs;
+        if (d == NONE || logicalUs < d) return logicalUs;
+        if (frameDurUs <= 0) return Math.max(0, d - 1);
+        return Math.max(0, d - frameDurUs);
     }
 
-    private void notifyVideoSizeChanged(int width, int height) {
-        videoSizeChangedHandler.accept(width, height);
-    }
-
-    private void notifyFrameReady(Image image) {
-        frameReadyHandler.accept(image);
-    }
-
-    private void notifyStatusChanged(String status) {
-        statusChangedHandler.accept(status);
-    }
-
-    private void notifyPlaybackStateChanged() {
-        playbackStateChangedHandler.accept(playbackOpen, pauseRequested);
-    }
-
-    private void notifyAudioOutputStateChanged() {
-        audioOutputStateChangedHandler.accept(audioOutputEnabled);
-    }
+    void tellPlayState() { onPlayState.accept(open, paused); }
 }
