@@ -1,15 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   
- *      - Made safe for concurrent process() calls: the three per-frame mask buffers are now per thread and
- *        passed explicitly to the methods that use them. Arithmetic is unchanged, so output is identical.
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
 import java.nio.ByteBuffer;
@@ -38,7 +27,7 @@ public class FrameBleeder extends FrameProcessor {
 
     private int maskWidth;
     private int maskHeight;
-    // The bright/blur masks are rewritten for every frame, so they cannot be shared between worker threads
+    // the bright/blur masks are rewritten for every frame, so they cannot be shared between worker threads
     // processing different frames at once. Each thread keeps its own set (allocated once per thread).
     private ThreadLocal<Masks> masksPerThread;
     private int[] xMaskLeft;
@@ -258,7 +247,7 @@ public class FrameBleeder extends FrameProcessor {
         return a + (b - a) * blend;
     }
 
-    // One thread's working storage for a frame.
+    // One threads working storage for a frame.
     private static final class Masks {
         final double[] bright;
         final double[] horizontalBlur;

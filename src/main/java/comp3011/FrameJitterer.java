@@ -1,14 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. 
- *      - Made safe for concurrent process() calls: the source-pixel scratch buffer is now per thread.
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
 import java.nio.ByteBuffer;
@@ -18,11 +8,11 @@ import org.bytedeco.javacv.Frame;
 
 /**
  * Randomly offsets each image frame to simulate unstable film transport. The sprockets driving film through old
- * projectors always had a tiny bit of slack or take-up in them, causing frames to jitter up and down or left and right
+ * projectors always had a tiny bit of slack or take up in them, causing frames to jitter up and down or left and right
  * slightly as they went through the projection bed. Simple but effective little effect.
  *
  * <p>
- * A deterministic per-frame random sequence chooses horizontal and vertical
+ * A deterministic per frame random sequence chooses horizontal and vertical
  * offsets. {@link #jitterFrame(ByteBuffer, int, int)} copies the original pixels
  * into the shifted position and fills exposed areas with black.
  * </p>
@@ -35,10 +25,10 @@ public class FrameJitterer extends FrameProcessor {
     private final int instanceIndex;
     private int mediaSeed;
     // Working copy of the frame being jittered. It is written on every frame, so a single shared buffer would be a
-    // race when two worker threads jitter two frames at once (one frame's pixels would leak into the other). Each
+    // race when two worker threads jitter two frames at once (one frames pixels would leak into the other). Each
     // thread therefore gets its own, allocated once per thread rather than once per frame.
     private ThreadLocal<byte[]> sourcePixelsPerThread;
-    private byte[] blackRow; // Read-only after initialise, so safely shared.
+    private byte[] blackRow; // Read only after initialise, so safely shared.
 
     public FrameJitterer() {
         super();
@@ -88,7 +78,7 @@ public class FrameJitterer extends FrameProcessor {
     private long seedForFrame(int frameNumber) {
         long seed = Integer.toUnsignedLong(mediaSeed) + Integer.toUnsignedLong(frameNumber);
 
-        // Mix adjacent frame numbers so Random's first samples are not correlated
+        // Mix adjacent frame numbers so Randoms first samples are not correlated
         // across consecutive frames.
         seed ^= seed >>> 30;
         seed *= 0xbf58476d1ce4e5b9L;

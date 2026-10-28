@@ -1,13 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
 import java.nio.ByteBuffer;
@@ -15,15 +6,15 @@ import java.nio.ByteBuffer;
 import org.bytedeco.javacv.Frame;
 
 /**
- * Draws the current video-frame number in the bottom-right corner of each frame,
- * using tiny 'seven segment display'-like rendering. This lets us read frame number
+ * Draws the current video frame number in the bottom right corner of each frame,
+ * using tiny seven segment display like rendering. This lets us read frame number
  * off screen captures so the correctness of other effects can be compared to a
  * reference implementation display the exact same frame number.
  *
  * <p>
  * {@link #process(Frame, InfoFrame)} converts the number to digits, and
  * {@link #drawDigit(ByteBuffer, int, int, int)} renders each digit using a small
- * seven-segment-style pixel glyph.
+ * seven segment style pixel glyph.
  * </p>
  */
 public class FrameNumberer extends FrameProcessor {
@@ -40,7 +31,7 @@ public class FrameNumberer extends FrameProcessor {
     private static final int LOWER_RIGHT = 32;
     private static final int BOTTOM = 64;
 
-    // 7-segment display rendering rules for each decimal digit:
+    // 7 segment display rendering rules for each decimal digit:
     private static final int[] DIGIT_SEGMENTS = {
             /* 0 */ TOP | UPPER_LEFT | UPPER_RIGHT | LOWER_LEFT | LOWER_RIGHT | BOTTOM,
             /* 1 */ UPPER_RIGHT | LOWER_RIGHT,
@@ -83,7 +74,7 @@ public class FrameNumberer extends FrameProcessor {
         int startY = videoInfo.imageHeight() - MARGIN - textHeight;
 
         if (startX < 0 || startY < 0) {
-            // Oops - frames are too small for our render!
+            // Oops   frames are too small for our render!
             return;
         }
 

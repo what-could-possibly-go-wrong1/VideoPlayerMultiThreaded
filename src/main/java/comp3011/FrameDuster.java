@@ -1,13 +1,4 @@
-/*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
- * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
- *
- * Copyright 2026 Simon Ratcliffe
- */
+// implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
 import java.nio.ByteBuffer;
@@ -16,10 +7,10 @@ import java.util.Random;
 import org.bytedeco.javacv.Frame;
 
 /**
- * Adds dark dust and hair-like marks to simulate damaged film.
+ * Adds dark dust and hair like marks to simulate damaged film.
  *
- * <p>{@link #process(Frame, InfoFrame)} uses a deterministic, media-specific
- * random sequence and a Poisson-distributed mark count. {@link #drawRandomDustMark(ByteBuffer, Random)}
+ * <p>{@link #process(Frame, InfoFrame)} uses a deterministic, media specific
+ * random sequence and a Poisson distributed mark count. {@link #drawRandomDustMark(ByteBuffer, Random)}
  * draws each curved mark as a series of softly darkened points.</p>
  */
 public class FrameDuster extends FrameProcessor {
