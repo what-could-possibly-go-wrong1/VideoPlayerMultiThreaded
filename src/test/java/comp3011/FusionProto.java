@@ -1,42 +1,135 @@
 package comp3011;
+ 
+import static org.junit.jupiter.api.Assertions.*;
+ 
 import java.io.File;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.util.*;
-import org.bytedeco.javacv.*;
-/** Prototype: fused row-wise flicker+bw+yellow+vignette vs sequential process(). */
-public class FusionProto { public static void main(String[] a) throws Exception {
-  FFmpegFrameGrabber g = MultiThreadedPlaybackIT.ReferencePlayer.openGrabber(new File(a[0]));
-  List<Frame> src = new ArrayList<>(); Frame f; while (src.size() < 48 && (f = g.grab()) != null) if (f.image != null) src.add(f.clone());
-  Frame t0 = src.get(0); int W=t0.imageWidth,H=t0.imageHeight,C=t0.imageChannels,S=t0.imageStride;
-  InfoVideo vi = new InfoVideo("movie", 480, W,H,t0.imageDepth,C,S, 24, 24, 41667, 0);
-  FrameFlickerer fl = new FrameFlickerer(); FrameBlackAndWhiter bw = new FrameBlackAndWhiter(); FrameYellower ye = new FrameYellower(); FrameVignetter vg = new FrameVignetter();
-  for (FrameProcessor p : List.of(fl,bw,ye,vg)) p.initialise(vi);
-  // grab private LUTs reflectively for the prototype only
-  java.lang.reflect.Field fr=FrameYellower.class.getDeclaredField("redLookup"),fg=FrameYellower.class.getDeclaredField("greenLookup"),fb=FrameYellower.class.getDeclaredField("blueLookup"); fr.setAccessible(true);fg.setAccessible(true);fb.setAccessible(true);
-  byte[] R=(byte[])fr.get(ye),G=(byte[])fg.get(ye),B=(byte[])fb.get(ye);
-  java.lang.reflect.Field fx=FrameVignetter.class.getDeclaredField("xLookups"),fy=FrameVignetter.class.getDeclaredField("yLookups"); fx.setAccessible(true);fy.setAccessible(true);
-  byte[][] XL=(byte[][])fx.get(vg), YL=(byte[][])fy.get(vg);
-  java.lang.reflect.Field fs=FrameFlickerer.class.getDeclaredField("mediaSeed"); fs.setAccessible(true); int seed=(int)fs.get(fl);
-  double bestSeq=1e9,bestFused=1e9; for (int rep=0; rep<8; rep++) {
-    List<Frame> a1=new ArrayList<>(), a2=new ArrayList<>(); for (Frame s: src){a1.add(s.clone());a2.add(s.clone());}
-    long t=System.nanoTime();
-    for (int i=0;i<a1.size();i++){ InfoFrame inf=new InfoFrame(i,0); for (FrameProcessor p: List.of(fl,bw,ye,vg)) p.process(a1.get(i),inf);} 
-    double seq=(System.nanoTime()-t)/1e6/a1.size();
-    t=System.nanoTime(); byte[] row=new byte[W*C];
-    for (int i=0;i<a2.size();i++) fuse((ByteBuffer)a2.get(i).image[0], i, seed, row, W, H, C, S, B, G, R, XL, YL);
-    double fused=(System.nanoTime()-t)/1e6/a2.size();
-    boolean same=true; for (int i=0;i<a1.size();i++) same &= TestFrames.sha1(a1.get(i)).equals(TestFrames.sha1(a2.get(i)));
-    bestSeq=Math.min(bestSeq,seq); bestFused=Math.min(bestFused,fused); if(!same) System.out.println("MISMATCH");
-  } System.out.printf("best of 8: sequential fwyv %.2f ms/frame, fused %.2f ms/frame => %.2fx%n", bestSeq, bestFused, bestSeq/bestFused); g.stop(); g.close(); }
-  static void fuse(ByteBuffer px, int i, int seed, byte[] row, int W, int H, int C, int S, byte[] B, byte[] G, byte[] R, byte[][] XL, byte[][] YL) {
-      Random rnd=new Random((long)seed+i); double dim=Math.abs(rnd.nextGaussian())*5.0; double sc=Math.max(0.0,100.0-dim)/100.0;
-      byte[] L=new byte[256]; for(int v=0;v<256;v++) L[v]=(byte)Math.max(0,Math.min((int)Math.round(v*sc),255));
-      for (int y=0;y<H;y++){ int off=y*S; px.get(off,row,0,row.length);
-        flick(row,L); bw(row,C); yel(row,C,B,G,R); vig(row,C,W,XL,YL[y]);
-        px.put(off,row,0,row.length);}
-  }
-  static void flick(byte[] row, byte[] L){ for (int k=0;k<row.length;k++) row[k]=L[row[k]&0xFF]; }
-  static void bw(byte[] row,int C){ for (int b=0;b<row.length;b+=C){int bb=row[b]&0xFF,gg=row[b+1]&0xFF,rr=row[b+2]&0xFF; byte lum=(byte)((54*rr+183*gg+19*bb)/256); for(int c=0;c<C;c++) row[b+c]=lum;} }
-  static void yel(byte[] row,int C,byte[] B,byte[] G,byte[] R){ for (int b=0;b<row.length;b+=C){row[b]=B[row[b]&0xFF];row[b+1]=G[row[b+1]&0xFF];row[b+2]=R[row[b+2]&0xFF];} }
-  static void vig(byte[] row,int C,int W,byte[][] XL,byte[] yl){ for (int x=0,b=0;x<W;x++,b+=C){byte[] xl=XL[x]; for(int c=0;c<C;c++){int v=xl[row[b+c]&0xFF]&0xFF; row[b+c]=yl[v];}} }
+ 
+import org.bytedeco.javacv.Frame;
+import org.junit.jupiter.api.Test;
+ 
+/*
+ * experiment: does "scanline fusion" make effects faster?
+ *
+ * normal:  effect1 does whole frame, then effect2 does whole frame, ...   (frame goes thru memory N times)
+ * fused:   do ALL effects on 8 rows (fits in cache), then next 8 rows, ... (frame goes thru memory once)
+ *
+ * only valid for PER-PIXEL effects that dont care where the pixel is (flicker, b&w, yellow)
+ * vignette DOES care where it is (dist from centre) -> cant fuse like this -> 2nd test proves that
+ *
+ * trick: dont rewrite the effects. just hand the REAL effects a fake small Frame ("band view")
+ * that points into the same memory (zero copy). init them with height=8.
+ *
+ * result: ~0.96x - 1.15x. basically nothing. effects are compute bound (lookup/maths per byte),
+ * NOT memory bound. so not worth a new effect api + duplicate code -> rejected. (see README)
+ * timings only printed, not asserted (differs per machine). correctness IS asserted.
+ */
+class ScanlineFusionExperimentIT {
+    static final int BAND = 8;          // 8 HD rows ~ 46KB, fits L2 easy
+    static final int REEL_LEN = 24;
+    static final int PASSES = 3;
+ 
+    static final String OK_TO_FUSE = "fwy";     // flicker, b&w, yellow  (bit of titans "...sfwyvd...")
+    static final String NOT_OK = "fwyv";        // + vignette = position dependent
+ 
+    @Test
+    void scanlineFusionIsPixelIdenticalButGainsLittle() throws Exception
+    {
+        EffectCostLedgerIT.Reel reel = hdReel();
+        List<FrameProcessor> fx = FrameProcessingPipelineTest.effects(OK_TO_FUSE);
+ 
+        Outcome normal = wholeFrames(fx, reel);
+        Outcome fused  = inBands(fx, reel);
+ 
+        assertEquals(normal.prints(), fused.prints(), "fusing per-pixel effects band by band must not change a single pixel");
+ 
+        double x = normal.ms() / fused.ms();
+        String rep = String.format(Locale.ROOT, """
+                Scanline fusion experiment, effects -%s on %dx%d frames (%d-row bands, best of %d passes):
+                  each effect sweeps the whole frame : %6.2f ms/frame
+                  all effects per %d-row band        : %6.2f ms/frame
+                  speed-up                           : %4.2fx  (pixel-identical: yes)
+                  conclusion: compute-bound, not memory-bound - too small a gain to justify a new effect API.
+                """, OK_TO_FUSE, reel.width(), reel.height(), BAND, PASSES, normal.ms(), BAND, fused.ms(), x);
+        System.out.print(rep);
+        Files.writeString(new File("target/scanline-fusion-report.txt").toPath(), rep);
+    }
+ 
+    // negative control!! if this ever comes out EQUAL the experiment isnt testing what it says
+    @Test
+    void bandViewsCannotFusePositionDependentEffects() throws Exception {
+        EffectCostLedgerIT.Reel reel = hdReel();
+        List<FrameProcessor> fx = FrameProcessingPipelineTest.effects(NOT_OK);
+        assertNotEquals(wholeFrames(fx, reel).prints(), inBands(fx, reel).prints(),
+                "vignette depends on row position so band views must change it");
+    }
+ 
+    static EffectCostLedgerIT.Reel hdReel() throws Exception {
+        File vid = TestFrames.generateVideo(new File("target/test-media/hd-load-test.mp4"), 1920, 800, 96, true);
+        EffectCostLedgerIT.Reel r = EffectCostLedgerIT.Reel.decode(vid, REEL_LEN);
+        assertTrue(r.height() % BAND == 0, "height must split into whole bands");
+        return r;
+    }
+ 
+    // normal way
+    static Outcome wholeFrames(List<FrameProcessor> fx, EffectCostLedgerIT.Reel reel) throws Exception {
+        for (FrameProcessor e : fx) e.initialise(reel.videoInfo());
+        return bestOf(reel, i -> {
+            Frame f = reel.workingFrame(i); InfoFrame inf = reel.frameInfo(i);
+            for (FrameProcessor e : fx) e.process(f, inf);
+        });
+    }
+ 
+    // fused way. SAME effect objects -> same random seeds (instanceIndex), just re-init'd as 8 rows tall
+    static Outcome inBands(List<FrameProcessor> fx, EffectCostLedgerIT.Reel reel) throws Exception
+    {
+        InfoVideo v = reel.videoInfo();
+        InfoVideo bandSized = new InfoVideo(v.mediaName(), v.totalVideoFrames(), v.imageWidth(), BAND,
+                v.imageDepth(), v.imageChannels(), v.imageStride(), v.frameRate(), v.intFrameRate(),
+                v.frameDurationUs(), v.pixelFormat());
+        for (FrameProcessor e : fx) e.initialise(bandSized);
+ 
+        return bestOf(reel, i -> {
+            Frame f = reel.workingFrame(i); InfoFrame inf = reel.frameInfo(i);
+            for (int row = 0; row < f.imageHeight; row += BAND) {
+                Frame band = bandView(f, row);
+                for (FrameProcessor e : fx) e.process(band, inf);
+            }
+        });
+    }
+ 
+    // fake little Frame that SHARES the big frame's memory (no copying)
+    static Frame bandView(Frame f, int row) {
+        ByteBuffer px = ((ByteBuffer) f.image[0]).duplicate();
+        px.clear().position(row * f.imageStride).limit((row + BAND) * f.imageStride);
+        Frame b = new Frame();
+        b.imageWidth = f.imageWidth;  b.imageHeight = BAND;
+        b.imageDepth = f.imageDepth;  b.imageChannels = f.imageChannels;  b.imageStride = f.imageStride;
+        b.image = new Buffer[]{ px.slice() };
+        return b;
+    }
+ 
+    // warmup, then fastest of PASSES. fingerprints taken after timing stops
+    static Outcome bestOf(EffectCostLedgerIT.Reel reel, Step step) throws Exception {
+        reel.rewind(); all(reel, step);
+        double best = Double.MAX_VALUE;
+        for (int p=0; p<PASSES; p++) {
+            reel.rewind();
+            long t0 = System.nanoTime();
+            all(reel, step);
+            best = Math.min(best, (System.nanoTime()-t0)/1e6);
+        }
+        List<String> prints = new ArrayList<>();
+        for (int i=0; i<reel.length(); i++) prints.add(TestFrames.sha1(reel.workingFrame(i)));
+        return new Outcome(best / reel.length(), prints);
+    }
+ 
+    static void all(EffectCostLedgerIT.Reel reel, Step step) throws Exception { for (int i=0;i<reel.length();i++) step.apply(i); }
+ 
+    interface Step { void apply(int i) throws Exception; }
+    record Outcome(double ms, List<String> prints) {}
 }
+ 
