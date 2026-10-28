@@ -8,7 +8,7 @@
  *   (c) Final check of all SOLID principles that may have been missed after own review
  *   (d) Formatting this header structure, and for comments that had visual/ascii components
  *   (e) ReadMe file writeup
- *   Claude was not used in any other way
+ *  
  * New file
  */
 // keeps thread priority configuration separate from the playback logic.
