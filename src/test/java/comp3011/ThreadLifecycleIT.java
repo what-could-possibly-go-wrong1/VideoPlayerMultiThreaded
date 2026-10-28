@@ -119,7 +119,9 @@ class ThreadLifecycleIT {
         MID_REEL("frames in flight: workers busy, decoder running") {
             @Override
             void leadUpTo(Rig rig) throws Exception {
-                rig.watchFrames(3);
+                // The pool starts a worker per frame handed to it until all exist, so watching at least WORKERS
+                // frames guarantees every worker has been started - however busy the machine is.
+                rig.watchFrames(WORKERS + 2);
             }
         },
         STALLED_DISPLAY("queue full: decoder blocked in put(), as when paused") {

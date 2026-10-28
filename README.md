@@ -213,6 +213,18 @@ Seeks therefore never have to wait for in-flight work, and rapid seeks coalesce 
 * `MultiThreadedPlaybackIT` decodes a real video with sound through the real `VideoDecoder` and compares every frame
   with the single threaded reference algorithm. It also checks end of stream, audio routing and that after a
   mid-stream seek only correct new-position frames arrive.
+* `ThreadLifecycleIT` stops playback at the three moments hardest to stop from (frames in flight on the workers,
+  the decoder blocked on a full queue, the decoder parked after the end of the media) and checks, by a census of the
+  player's thread families, that every playback thread terminates within 2 s (measured: 1-50 ms). It also checks that
+  12 start/stop cycles leave no threads behind. Its peak census is a negative control, and the test was verified to
+  catch a deliberately leaked worker pool.
+* `TimelineScrubbingIT` scrubs the timeline (40 seeks a few ms apart, in three gestures including jumps past the end)
+  while a second thread consumes frames like the display. It asserts no deadlock, that epochs never run backwards,
+  that the landing frames are pixel-identical to a clean decode, and that the first frame of *every* seek is exactly
+  where a clean single-threaded seek lands. A planted bug (labelling frames with the latest requested epoch instead of
+  the one they were decoded in) is caught on every run. The test also exposed an FFmpeg library quirk, reproduced
+  without threads: re-seeking to the position just seeked to delivers that frame twice, which the original player
+  shares.
 * During development, 200 HD frames of `-nssnfwyvdjmbp` and of `-jjmmbbddpp` were also hashed with the
   **unmodified starter code** and matched exactly by the new player on 2 and 8 workers.
 
