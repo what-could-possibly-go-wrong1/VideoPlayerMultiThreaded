@@ -4,13 +4,16 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Passes the command line's frame processors to the model; selects the multi-threaded model (default) or
+ *        the single threaded reference model through the PlaybackModel interface.
  *
  * Copyright 2026 Simon Ratcliffe
  */
 package comp3011;
 
 import java.io.File;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 import javafx.scene.Scene;
@@ -22,27 +25,47 @@ import javafx.scene.input.KeyEvent;
  * The controller part of the video player model-view-controller architecture.
  * 
  * <p>
- * Wires up events from the {@link VideoPlayerView} to the {@link VideoPlayerModel}.
+ * Wires up events from the {@link VideoPlayerView} to the {@link PlaybackModel}.
  * This includes button actions, keyboard shortcuts and display resizing.
+ * </p>
+ *
+ * <p>
+ * The controller chooses which {@link PlaybackModel} to create: normally the multi-threaded
+ * {@link VideoPlayerModel}, or the original {@link SingleThreadedVideoPlayerModel} when the hidden
+ * {@code --single-threaded} switch was given. Either way it talks to the model only through the interface.
  * </p>
  */
 public class VideoPlayerController {
-    private final VideoPlayerModel model;
+    private final PlaybackModel model;
     private final VideoPlayerView view;
     private final BiConsumer<Integer, Integer> videoSizeChangedHandler;
 
     public VideoPlayerController(
             boolean audioEnabled,
+            List<FrameProcessorOption> frameProcessorOptions,
+            boolean singleThreaded,
             BiConsumer<Integer, Integer> videoSizeChangedHandler) {
         this.view = new VideoPlayerView();
         this.videoSizeChangedHandler = videoSizeChangedHandler;
-        model = new VideoPlayerModel(
-                audioEnabled,
-                this::onVideoSizeChanged,
-                this::onFrameReady,
-                this::onStatusChanged,
-                this::onPlaybackStateChanged,
-                this::onAudioOutputStateChanged);
+        if (singleThreaded) {
+            model = new SingleThreadedVideoPlayerModel(
+                    audioEnabled,
+                    frameProcessorOptions,
+                    this::onVideoSizeChanged,
+                    this::onFrameReady,
+                    this::onStatusChanged,
+                    this::onPlaybackStateChanged,
+                    this::onAudioOutputStateChanged);
+        } else {
+            model = new VideoPlayerModel(
+                    audioEnabled,
+                    frameProcessorOptions,
+                    this::onVideoSizeChanged,
+                    this::onFrameReady,
+                    this::onStatusChanged,
+                    this::onPlaybackStateChanged,
+                    this::onAudioOutputStateChanged);
+        }
 
         view.getStartOverButton().setOnAction(_ -> startOver());
         view.getBackFiveButton().setOnAction(_ -> backFiveSeconds());

@@ -4,7 +4,8 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Hands the parsed frame processor options and model choice from the command line to the controller.
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -22,7 +23,7 @@ import javafx.stage.Stage;
  * Extents JavaFX's Application class and is the entry point for the video player.
  * Provided required JavaFX methods start and stop and also basic on-screen window
  * management functions. Owns the {@link VideoPlayerController}, which in turn owns
- * the {@link VideoPlayerView} and {@link VideoPlayerController}.
+ * the {@link VideoPlayerView} and the {@link PlaybackModel}.
  *
  * <p>
  * Creates the JavaFX Stage and Scene, the VideoPlayerController, and applies
@@ -45,6 +46,8 @@ public class VideoPlayerApp extends Application {
 
         controller = new VideoPlayerController(
                 commandLineController.isAudioRequested(),
+                commandLineController.getFrameProcessorOptions(),
+                commandLineController.isSingleThreadedRequested(),
                 this::setVideoSize);
 
         Scene scene = new Scene(controller.getView().getRoot());

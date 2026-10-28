@@ -4,7 +4,8 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Added writeBlocking for use from the dedicated AudioOutput thread; documented thread confinement.
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -28,15 +29,21 @@ import org.bytedeco.javacv.Frame;
  * <p>
  * Converts supported packed or planar 16-bit sample buffers to the
  * interleaved, little-endian PCM format required by {@link SourceDataLine}.
- * {@link VideoPlayerModel} singleton schedules when the resulting audio is
- * written and owns the AudioPlayer.
+ * In the multi-threaded player the {@link AudioOutput} that owns this object decides when audio is written.
+ * </p>
+ *
+ * <p>
+ * <b>Threading:</b> {@link #copySamples(Frame)} reuses a private conversion buffer and must only ever be called from
+ * one thread (the decoder thread). {@link #write}/{@link #writeBlocking} are called from one other thread (the audio
+ * thread), and {@link #flush()} may be called from any thread - Java Sound lines support flushing while another
+ * thread is writing, which makes the blocked write return early.
  * </p>
  */
 public class AudioPlayer implements AutoCloseable {
     private static final long WRITE_TRACE_THRESHOLD_NS = 2_000_000L;
     private static final int AUDIO_WARMUP_BYTES = 4096;
 
-    private SourceDataLine line; // Java Sound's audio-output interface - for us a destination, not a source.
+    private volatile SourceDataLine line; // Java Sound's audio-output interface - for us a destination, not a source.
     private byte[] outputBuffer = new byte[0];
 
     public void open(int sampleRate, int channels) throws LineUnavailableException {
@@ -93,6 +100,20 @@ public class AudioPlayer implements AutoCloseable {
                     availableBeforeWrite);
         }
         return written;
+    }
+
+    /**
+     * Writes to the sound device, blocking while its buffer is full. Only appropriate on a thread dedicated to audio
+     * (see {@link AudioOutput}); the single threaded model must use the non-blocking {@link #write} instead.
+     *
+     * @return bytes written, which may be fewer than requested if the line is flushed or closed meanwhile
+     */
+    public int writeBlocking(byte[] samples, int offset, int length) {
+        SourceDataLine currentLine = line;
+        if (currentLine == null || length <= 0) {
+            return 0;
+        }
+        return currentLine.write(samples, offset, length);
     }
 
     public void flush() {

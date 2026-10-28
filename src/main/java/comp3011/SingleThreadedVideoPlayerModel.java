@@ -4,7 +4,11 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <student name and student number insert here upon modification>
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Renamed from VideoPlayerModel and kept as the single threaded REFERENCE implementation, selectable with
+ *        the hidden --single-threaded switch. Playback logic deliberately left as supplied so that it remains a
+ *        faithful baseline for frame-correctness and performance comparison with the multi-threaded VideoPlayerModel.
+ *      - Implements PlaybackModel; effects now come from the command line instead of being hard coded.
  *
  * Copyright 2026 Simon Ratcliffe
  */
@@ -12,7 +16,6 @@ package comp3011;
 
 import java.io.File;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 import java.util.function.BiConsumer;
@@ -28,7 +31,14 @@ import javafx.application.Platform;
 import javafx.scene.image.Image;
 
 /**
+ * <b>Reference implementation - not the default player.</b> This is the original single threaded model, retained
+ * so the multi-threaded {@link VideoPlayerModel} can be compared against it (run the player with the hidden
+ * {@code --single-threaded} switch, or see the integration tests). New playback features belong in
+ * {@link VideoPlayerModel}.
+ *
+ * <p>
  * The model part of the video player model-view-controller architecture.
+ * </p>
  *
  * <p>
  * Owns the FFmpeg decoder, playback clock, seeking logic, audio scheduling,
@@ -38,7 +48,7 @@ import javafx.scene.image.Image;
  * decoupled from the JavaFX view.
  * </p>
  */
-public class VideoPlayerModel {
+public class SingleThreadedVideoPlayerModel implements PlaybackModel {
     private static final long NO_SEEK_REQUEST = -1; // Sentinel value used when no seek position is active.
     private static final long FIVE_SECONDS_US = 5_000_000L;
     private static final long AUDIO_LEAD_NS = 30_000_000L;
@@ -89,8 +99,9 @@ public class VideoPlayerModel {
     private long pauseStartedNs;
     private long relativeSeekBaseUs = NO_SEEK_REQUEST;
 
-    public VideoPlayerModel(
+    public SingleThreadedVideoPlayerModel(
             boolean audioEnabled,
+            List<FrameProcessorOption> frameProcessorOptions,
             BiConsumer<Integer, Integer> videoSizeChangedHandler,
             Consumer<Image> frameReadyHandler,
             Consumer<String> statusChangedHandler,
@@ -102,19 +113,11 @@ public class VideoPlayerModel {
         this.statusChangedHandler = statusChangedHandler;
         this.playbackStateChangedHandler = playbackStateChangedHandler;
         this.audioOutputStateChangedHandler = audioOutputStateChangedHandler;
-        this.frameProcessors = new ArrayList<>();
-//        frameProcessors.add(new FrameBleeder());
-//        frameProcessors.add(new FrameScratcher());
-//        frameProcessors.add(new FrameDuster());
-//        frameProcessors.add(new FramePepperer());
-//        frameProcessors.add(new FrameBlackAndWhiter());
-//        frameProcessors.add(new FrameYellower());
-//        frameProcessors.add(new FrameVignetter());
-//        frameProcessors.add(new FrameFlickerer());
-//        frameProcessors.add(new FrameJitterer());
-//        frameProcessors.add(new FrameNumberer());
+        // Effects are constructed here, once and in command-line order (see FrameProcessorOption.instantiate).
+        this.frameProcessors = FrameProcessorOption.instantiate(frameProcessorOptions);
     }
 
+    @Override
     public void play(File file) {
         videoFile = file;
         videoDurationUs = NO_SEEK_REQUEST;
@@ -122,6 +125,7 @@ public class VideoPlayerModel {
         startPlayback(0, false, NO_SEEK_REQUEST);
     }
 
+    @Override
     public void startOver() {
         if (videoFile == null) {
             return;
@@ -130,14 +134,17 @@ public class VideoPlayerModel {
         seekTo(0);
     }
 
+    @Override
     public void backFiveSeconds() {
         seekRelative(-FIVE_SECONDS_US);
     }
 
+    @Override
     public void forwardFiveSeconds() {
         seekRelative(FIVE_SECONDS_US);
     }
 
+    @Override
     public void togglePause() {
         if (!playbackOpen) {
             if (videoFile != null) {
@@ -159,6 +166,7 @@ public class VideoPlayerModel {
         notifyPlaybackStateChanged();
     }
 
+    @Override
     public void toggleAudioOutput() {
         audioOutputEnabled = !audioOutputEnabled;
         pendingAudio.clear();
@@ -166,10 +174,12 @@ public class VideoPlayerModel {
         notifyAudioOutputStateChanged();
     }
 
+    @Override
     public boolean isAudioOutputEnabled() {
         return audioOutputEnabled;
     }
 
+    @Override
     public void stopPlayback() {
         closePlaybackResources();
         currentTimestampUs = 0;
@@ -179,6 +189,7 @@ public class VideoPlayerModel {
         notifyPlaybackStateChanged();
     }
 
+    @Override
     public void shutdown() {
         closePlaybackResources();
     }
