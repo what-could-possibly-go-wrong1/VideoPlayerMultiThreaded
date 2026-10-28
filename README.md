@@ -1,5 +1,5 @@
 # COMP3011 Assignment 2 - Multi-threaded Video Player
-!!I forgot to upload everything to a github repo before doing everything and only saw I had to when re-reading the instructions!!
+
 For more information on this code and how to get started, see https://learn.adelaide.edu.au/courses/30747/assignments/94505
 
 Starter code by Simon Ratcliffe (in collaboration with GPT-5.6 Terra). Modifications and new files by
@@ -138,6 +138,38 @@ With 2 cores the speed-up cannot exceed 2x. It grows with core count, because th
 steadily (−1.1 s to −1.7 s and growing) while the multi-threaded player held a steady +0.2 s on the same machine.
 
 ---
+
+## Optimisations evaluated
+
+Before optimising, measure. Two integration tests record the evidence (run by `mvn verify`; reports are written
+to `target/`).
+
+**Where the time goes (`EffectCostLedgerIT`):** milliseconds of one core per 1920x800 frame, measured on a 2-core
+cloud VM (numbers vary by machine; the proportions are what matter):
+
+| effect | ms | share |
+|---|---|---|
+| bleed | 27.7 | 53% |
+| vignette | 8.1 | 15% |
+| black-and-white | 5.5 | 10% |
+| mottle | 5.4 | 10% |
+| yellow | 3.8 | 7% |
+| flicker | 1.8 | 3% |
+| jitter, pepper, dust, number, scratch | < 0.4 each | < 1% each |
+
+**All 11 effects applied once cost 52.7 ms, which is 126% of a single core's 41.7 ms budget per frame at 24 fps.** So
+even one pass of the full set cannot play in real time on one core, whatever the code quality, which is the case
+for spreading frames across cores. TITAN's stress ladder stacks these four times over.
+
+**Scanline fusion, evaluated and rejected (`ScanlineFusionExperimentIT`):** flicker, black-and-white and yellow
+are *per-pixel* effects, so a run of them could be applied to one cache-sized band of 8 rows at a time instead of
+each sweeping the whole 4.6 MB frame (loop fusion / cache blocking). The experiment runs the real, unmodified
+effects on zero-copy band views of the frame and proves the result pixel-identical. It also proves that the
+vignette, which depends on each pixel's position, cannot be fused this way. Result: **0.96x to 1.15x** (the
+latter for a hand-written fused loop in an earlier prototype). The effects are compute-bound (a lookup or
+arithmetic per byte), not memory-bound, so this was not worth a new effect API and a second implementation of
+every per-pixel effect. The parallel design already gets its speed-up from using more cores, which is where the
+headroom actually is.
 
 ## Concurrency correctness
 
