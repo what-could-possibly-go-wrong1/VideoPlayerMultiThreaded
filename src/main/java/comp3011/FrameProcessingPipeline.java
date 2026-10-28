@@ -84,14 +84,21 @@ public final class FrameProcessingPipeline<T> implements AutoCloseable {
     }
 
     /**
-     * The default: one worker per available core, keeping one core free for the GUI and screen rendering on machines
-     * with four or more cores.
+     * The default: one worker per available core, less the cores kept free for everything else the player needs - two
+     * on machines with eight or more cores, one on machines with four to seven.
      */
     public static int defaultWorkerCount() {
         // If every core is busy applying effects, the JavaFX render thread cannot redraw the screen on time and
-        // frames are visibly dropped, however fast they were prepared. With 4+ cores, giving up one is cheap. With
-        // fewer it would cost too much parallelism, so there we rely on the workers' lower thread priority alone.
+        // frames are visibly dropped, however fast they were prepared. The free cores also absorb the decoder's own
+        // FFmpeg threads, garbage collection and - on a shared machine - other programs. On TITAN's 8-core machine
+        // under heavy outside load, keeping only one core free let overload show up as dropped frames; a second free
+        // core is meant to make the player fall behind gracefully instead (every frame still shown), which is the
+        // right way to fail. With fewer than four cores, giving one up would cost too much parallelism, so there the
+        // workers' lower thread priority has to suffice.
         int cores = Runtime.getRuntime().availableProcessors();
+        if (cores >= 8) {
+            return cores - 2;
+        }
         return cores >= 4 ? cores - 1 : cores;
     }
 

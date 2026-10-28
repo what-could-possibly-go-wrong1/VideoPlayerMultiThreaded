@@ -1,32 +1,51 @@
-// STUDY COPY - same logic as DisplayThreadPriority.java, scruffier. neat one goes to gradescope
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file.
+ */
 package comp3011;
 
-/*
- * bumps up the priority of the 2 javafx threads that actually put frames on screen
+/**
+ * Raises the priority of the two JavaFX threads that put frames on screen.
  *
- * why: frames we prepared early are WASTED if the screen doesnt get redrawn on time.
- *   - "JavaFX Application Thread" = our display logic (pump etc)
- *   - "QuantumRenderer-0"         = javafx's render thread, turns the scene into pixels
- * both use barely any cpu but they need it PROMPTLY
+ * <p>
+ * Frames prepared ahead of time are wasted if the screen is not redrawn when they are due. JavaFX redraws on two
+ * threads: the <i>JavaFX Application Thread</i> (our display logic runs here) and its <i>render thread</i>
+ * ({@code QuantumRenderer-0}), which turns the scene into pixels. Both use little CPU but must get it promptly.
+ * </p>
  *
- * we already run our own heavy threads BELOW normal (workers 3, decoder 4) so they stay out of the way.
- * but on a shared machine (titan on deadline night...) OTHER programs compete too, at normal priority.
- * display threads above normal -> they win vs those as well.
- * windows actually honours java priorities (-> THREAD_PRIORITY_ABOVE_NORMAL). elsewhere just a hint, harmless
+ * <p>
+ * The player already runs its own heavy threads below normal priority (see {@link FrameProcessingPipeline} and
+ * {@link VideoDecoder}), which keeps them out of the display's way. But on a shared machine the competition also comes
+ * from <i>other programs</i>, whose threads run at normal priority. Raising the two display threads above normal lets
+ * them win that competition too. On Windows, which honours Java thread priorities, the boost maps to
+ * {@code THREAD_PRIORITY_HIGHEST}; elsewhere it is a harmless hint.
+ * </p>
  *
- * no javafx api gives you the render thread so we find it by NAME. if javafx ever renames it, the boost just
- * doesnt apply to it - nothing breaks
+ * <p>
+ * The render thread is not exposed by any JavaFX API, so it is found by its name. If a future JavaFX renames it, the
+ * boost simply does not apply to it: nothing breaks, and the application thread is still boosted.
+ * </p>
  */
 final class DisplayThreadPriority {
-    static final int DISPLAY_PRIORITY = Thread.NORM_PRIORITY + 2;   // = 7
-    static final String RENDER_THREAD = "QuantumRenderer";
+    // Highest short of MAX_PRIORITY (which Windows may treat as time-critical). These threads use very little CPU,
+    // so ranking them above every normal thread on the machine cannot starve anything else.
+    static final int DISPLAY_PRIORITY = Thread.MAX_PRIORITY - 1;
+    private static final String RENDER_THREAD_PREFIX = "QuantumRenderer";
 
-    private DisplayThreadPriority() {}   // just a static helper
+    private DisplayThreadPriority() {
+    }
 
-    // call ON the javafx thread, after the toolkit started (VideoPlayerModel's constructor does)
+    /** Must be called on the JavaFX Application Thread, after the toolkit has started. */
     static void boostDisplayThreads() {
         Thread.currentThread().setPriority(DISPLAY_PRIORITY);
-        for (Thread t : Thread.getAllStackTraces().keySet())
-            if (t.getName().startsWith(RENDER_THREAD)) t.setPriority(DISPLAY_PRIORITY);
+        for (Thread thread : Thread.getAllStackTraces().keySet()) {
+            if (thread.getName().startsWith(RENDER_THREAD_PREFIX)) {
+                thread.setPriority(DISPLAY_PRIORITY);
+            }
+        }
     }
 }
