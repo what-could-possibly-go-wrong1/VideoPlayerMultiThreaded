@@ -54,7 +54,7 @@ final class PlaybackSession implements AutoCloseable {
     // variation in per-frame effect cost; the cap bounds memory use (each buffered HD frame is several MB).
     private static final int BUFFERED_FRAMES_PER_WORKER = 2;
     private static final int MIN_BUFFERED_FRAMES = 6;
-    private static final int MAX_BUFFERED_FRAMES = 48;
+    private static final int MAX_BUFFERED_FRAMES = 24; // About one second of 24 fps video.
 
     private final FFmpegFrameGrabber grabber;
     private final FrameProcessingPipeline<Image> pipeline;

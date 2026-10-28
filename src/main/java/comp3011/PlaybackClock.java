@@ -90,7 +90,16 @@ public final class PlaybackClock {
         notifyAll();
     }
 
-    /** The media timestamp the clock was anchored to, i.e. the first frame shown in this epoch. */
+    /**
+     * Shifts the whole schedule later by {@code delayNs}. Used when a frame is shown late, so that the frames after
+     * it keep their full display time instead of being rushed through (see VideoPlayerModel.slipIfLate).
+     */
+    public synchronized void delay(long delayNs) {
+        anchorNs += delayNs;
+        notifyAll();
+    }
+
+    /** The media timestamp the clock was most recently anchored to. */
     public synchronized long anchorMediaUs() {
         return anchorMediaUs;
     }

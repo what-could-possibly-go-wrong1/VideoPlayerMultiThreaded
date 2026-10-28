@@ -46,6 +46,15 @@ class PlaybackClockTest {
     }
 
     @Test
+    void delayingSlipsTheWholeScheduleLater() {
+        PlaybackClock clock = new PlaybackClock();
+        clock.reset(1);
+        clock.startAt(0, 0);
+        clock.delay(30 * MS); // A frame was shown 30ms late...
+        assertEquals(30 * MS + 41 * MS, clock.targetTimeNs(41_000), "...so later frames keep their full spacing");
+    }
+
+    @Test
     void audioWaiterIsReleasedWhenDue() throws Exception {
         PlaybackClock clock = new PlaybackClock();
         clock.reset(7);

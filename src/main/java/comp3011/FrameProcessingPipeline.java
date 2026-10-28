@@ -62,6 +62,9 @@ import org.bytedeco.javacv.Frame;
  * @param <T> what each processed frame is rendered into
  */
 public final class FrameProcessingPipeline<T> implements AutoCloseable {
+    /** Worker threads run below normal priority; see {@link WorkerThreadFactory}. */
+    static final int EFFECT_WORKER_PRIORITY = Thread.NORM_PRIORITY - 2;
+
     private final List<FrameProcessor> processors;
     private final Function<Frame, T> renderer;
     private final ExecutorService workers;
@@ -80,9 +83,16 @@ public final class FrameProcessingPipeline<T> implements AutoCloseable {
         this.workers = Executors.newFixedThreadPool(this.workerCount, new WorkerThreadFactory());
     }
 
-    /** A sensible default: one worker per available core. */
+    /**
+     * The default: one worker per available core, keeping one core free for the GUI and screen rendering on machines
+     * with four or more cores.
+     */
     public static int defaultWorkerCount() {
-        return Runtime.getRuntime().availableProcessors();
+        // If every core is busy applying effects, the JavaFX render thread cannot redraw the screen on time and
+        // frames are visibly dropped, however fast they were prepared. With 4+ cores, giving up one is cheap. With
+        // fewer it would cost too much parallelism, so there we rely on the workers' lower thread priority alone.
+        int cores = Runtime.getRuntime().availableProcessors();
+        return cores >= 4 ? cores - 1 : cores;
     }
 
     public int workerCount() {
@@ -176,6 +186,9 @@ public final class FrameProcessingPipeline<T> implements AutoCloseable {
         public Thread newThread(Runnable task) {
             Thread thread = new Thread(task, "frame-worker-" + poolNumber + "-" + threadNumber.getAndIncrement());
             thread.setDaemon(true);
+            // Below normal priority, so the JavaFX thread, the render thread and the audio thread always win the CPU
+            // when they need it. Effects only need throughput, not promptness (frames are prepared well ahead).
+            thread.setPriority(EFFECT_WORKER_PRIORITY);
             return thread;
         }
     }

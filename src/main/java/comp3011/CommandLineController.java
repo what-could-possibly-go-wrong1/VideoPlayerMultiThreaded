@@ -134,7 +134,7 @@ public class CommandLineController {
         lines.add("");
         lines.add("Frame processors:");
         for (FrameProcessorOption option : FrameProcessorOption.values()) {
-            lines.add(String.format("  -%c, %-18s%s", option.shortFlag(), option.longFlag(), option.description()));
+            lines.add(String.format("  -%c, %-19s%s", option.shortFlag(), option.longFlag(), option.description()));
         }
         lines.add("");
         lines.add("Frame processors are applied in command-line order and may be repeated.");

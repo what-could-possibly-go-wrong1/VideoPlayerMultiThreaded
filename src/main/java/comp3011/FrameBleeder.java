@@ -4,7 +4,7 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *   
  *      - Made safe for concurrent process() calls: the three per-frame mask buffers are now per thread and
  *        passed explicitly to the methods that use them. Arithmetic is unchanged, so output is identical.
  *

@@ -2,7 +2,7 @@
  * COMP3011 Assignment 2 - multi-threaded video player.
  *
  * Authors:
- *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *   1
  *
  * New file.
  */

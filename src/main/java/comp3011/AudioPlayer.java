@@ -4,7 +4,7 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *  
  *      - Added writeBlocking for use from the dedicated AudioOutput thread; documented thread confinement.
  *
  * Copyright 2026 Simon Ratcliffe

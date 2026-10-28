@@ -57,6 +57,8 @@ public final class AudioOutput implements AutoCloseable, VideoDecoder.AudioSink 
         this.audioEnabled = audioEnabled;
         this.thread = new Thread(this::run, "audio-output");
         this.thread.setDaemon(true);
+        // Above normal: very little CPU, but must be prompt - a late write is an audible gap.
+        this.thread.setPriority(Thread.NORM_PRIORITY + 2);
     }
 
     public void start() {

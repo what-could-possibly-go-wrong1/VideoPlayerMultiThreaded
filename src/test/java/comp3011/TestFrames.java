@@ -25,13 +25,26 @@ final class TestFrames {
     private TestFrames() {
     }
 
-    /** A fingerprint of a frame's pixels: equal hashes mean pixel-identical frames. */
+    /**
+     * A fingerprint of a frame's visible pixels: equal hashes mean pixel-identical frames.
+     *
+     * <p>
+     * Only the first {@code width * channels} bytes of each row are hashed. Rows may be padded out to
+     * {@code imageStride} for memory alignment (e.g. a 480 pixel wide video has 96 bytes of padding per row), and
+     * that padding holds whatever was in memory before - it is never drawn, never touched by effects, and can
+     * legitimately differ between two decodes of the same frame.
+     * </p>
+     */
     static String sha1(Frame frame) {
         try {
             ByteBuffer pixels = ((ByteBuffer) frame.image[0]).duplicate();
-            pixels.clear().limit(frame.imageStride * frame.imageHeight);
+            int visibleRowBytes = frame.imageWidth * frame.imageChannels;
             MessageDigest digest = MessageDigest.getInstance("SHA-1");
-            digest.update(pixels);
+            for (int y = 0; y < frame.imageHeight; y++) {
+                int rowStart = y * frame.imageStride;
+                pixels.clear().position(rowStart).limit(rowStart + visibleRowBytes);
+                digest.update(pixels);
+            }
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);

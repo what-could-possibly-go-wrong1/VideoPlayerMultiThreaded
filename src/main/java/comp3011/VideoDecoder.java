@@ -130,6 +130,9 @@ public final class VideoDecoder<T> implements AutoCloseable {
         this.decodeEpoch = initialEpoch;
         this.thread = new Thread(this::run, "video-decoder");
         this.thread.setDaemon(true);
+        // Slightly below normal: it works ahead of the display, so it must never delay the GUI or rendering, but it
+        // is favoured over the effect workers so they are never starved of frames.
+        this.thread.setPriority(Thread.NORM_PRIORITY - 1);
     }
 
     public void start() {

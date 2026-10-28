@@ -31,9 +31,9 @@ Tune the load test with `-Dperf.effects=bbmmpp -Dperf.frames=96 -Dperf.workers=8
 
 ```
 Frame processors:
-  -n, --number-frames   Render the frame number onto each frame
+  -n, --number-frames    Render the frame number onto each frame
   ...
-  -p, --pepper-frames   Pepper frames with dark spots/blotches
+  -p, --pepper-frames    Pepper frames with dark spots/blotches
 ```
 
 * **`FrameProcessorOption`** (new enum) is the single table of effects: short flag, long flag, help description and
@@ -71,7 +71,7 @@ sit idle.
  +-----------------+                                        +------------------+
  |  video-decoder  |   pooled frame copy   +-----------------------+                  ^
  |  thread         |---------------------->|  frame-worker-N       |  effects + Image |  PlaybackClock
- |  (owns FFmpeg)  |       (executor)      |  threads (1 per core) |------+           |  (shared)
+ |  (owns FFmpeg)  |       (executor)      |  threads (per core)   |------+           |  (shared)
  +-----------------+                       +-----------------------+      |           v
           |                                                               |  +------------------+
           |  DecodedFrame(future), in decode order                        +->|  JavaFX thread   |---> screen
@@ -83,8 +83,25 @@ sit idle.
 |---|---|---|
 | JavaFX application thread | `VideoPlayerModel` | GUI and user commands; on each heartbeat, shows the head frame of the presentation queue if it is finished and due. Never decodes or processes. |
 | `video-decoder` | `VideoDecoder` | Sole owner of the FFmpeg grabber. Decodes, copies each picture into a pooled frame, submits it to the workers, publishes a `DecodedFrame` (holding a future) **in decode order**. Routes sound to the audio thread. Serves seeks. |
-| `frame-worker-N` (one per core) | `FrameProcessingPipeline` | Runs the **whole** effect chain, in command-line order, on one frame, then converts it to a JavaFX `Image`. Different frames run on different cores at once. |
+| `frame-worker-N` (one per core; one core kept free on 4+ cores) | `FrameProcessingPipeline` | Runs the **whole** effect chain, in command-line order, on one frame, then converts it to a JavaFX `Image`. Different frames run on different cores at once. |
 | `audio-output` | `AudioOutput` | Waits on the clock until each sound chunk is due, then writes it (blocking writes are fine on its own thread). |
+
+**Keeping the screen smooth.** Preparing frames quickly is not enough: JavaFX must also get CPU time to draw
+them, or frames are visibly dropped even though they were ready. So on machines with 4 or more cores the design leaves one core free
+(workers = cores - 1), and on all machines it runs the effect workers below normal priority and the decoder just below normal, and gives the
+(lightweight) audio thread above-normal priority. The GUI and render threads therefore always win the CPU when
+they need it, and the effects soak up whatever is left. The look-ahead buffer is capped at about one second
+(24 frames) to bound memory use.
+
+Two display rules complete this (`VideoPlayerModel.prerollComplete` and `slipIfLate`):
+
+* **Pre-roll:** the clock starts only once the first batch of frames - one per worker - is ready. The workers
+  process that batch in parallel, so it costs almost no start-up time, but frame 2 is no longer due before its
+  worker has finished it.
+* **Slip, don't rush:** if a frame is ever shown more than half a frame late, the schedule slips back by the
+  lateness instead of racing through the backlog. Racing would put frames on screen for a single 16.7 ms refresh,
+  which looks (and to TITAN's screen capture, measures) like dropped frames. Measured under overload on a 2-core
+  machine: frames shown for one refresh or less went from 55 to 0, and in no case is a frame number ever skipped.
 
 `PlaybackSession` bundles everything that lives for one open of the media (grabber, decoder, worker pool, audio)
 and shuts it down in a safe order. `PlaybackClock` maps media time to wall-clock time and is shared by the display
@@ -117,7 +134,7 @@ same output on both paths), measured on a 2-core cloud VM:
 | **speed-up** | **1.80x** | |
 
 With 2 cores the speed-up cannot exceed 2x. It grows with core count, because the workers scale with
-`availableProcessors()`. In the running player with the same 13 effects, the single threaded model's headroom fell
+`availableProcessors()` (less one core kept free for rendering - see below). In the running player with the same 13 effects, the single threaded model's headroom fell
 steadily (−1.1 s to −1.7 s and growing) while the multi-threaded player held a steady +0.2 s on the same machine.
 
 ---

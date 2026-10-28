@@ -45,6 +45,9 @@ import javafx.scene.image.Image;
  * {@link java.util.concurrent.CompletableFuture}s for processed frames, and the synchronised clock.</li>
  * <li>Seeks never wait for in-flight work. Instead a new <i>epoch</i> begins, and frames or audio from older
  * epochs are recognised and discarded wherever they turn up (see {@link VideoDecoder}).</li>
+ * <li>Every frame stays on screen for a full frame period: if processing ever falls behind, the clock slips
+ * rather than rushing through the backlog (which would make frames flash past unseen), and playback only starts
+ * once a first batch of frames is ready (pre-roll).</li>
  * <li>Frames are displayed strictly in decode order, one at a time, so frame correctness does not depend on which
  * worker finishes first.</li>
  * </ul>
@@ -52,6 +55,8 @@ import javafx.scene.image.Image;
 public class VideoPlayerModel implements PlaybackModel {
     private static final long NO_SEEK_REQUEST = -1; // Sentinel value used when no seek position is active.
     private static final long FIVE_SECONDS_US = 5_000_000L;
+    // Longest we wait for the pre-roll (see prerollComplete) before starting playback anyway.
+    private static final long MAX_PREROLL_WAIT_NS = 2_000_000_000L;
 
     private final List<FrameProcessor> frameProcessors;
     private final int workerCount;
@@ -81,6 +86,8 @@ public class VideoPlayerModel implements PlaybackModel {
     private int videoFrameDurationUs;
     private int intFrameRate;
     private long logicalPlaybackBaseUs;
+    private long epochFirstMediaUs; // Media timestamp of the first frame shown in the current epoch.
+    private long epochStartedNs; // When the current epoch began, for the pre-roll time limit.
     private long relativeSeekBaseUs = NO_SEEK_REQUEST;
 
     public VideoPlayerModel(
@@ -265,6 +272,7 @@ public class VideoPlayerModel implements PlaybackModel {
         currentTimestampUs = logicalTimestampUs;
         relativeSeekBaseUs = logicalTimestampUs;
         logicalPlaybackBaseUs = logicalTimestampUs;
+        epochStartedNs = System.nanoTime();
     }
 
     // Called on every JavaFX heartbeat. Unlike the single threaded model this never decodes or processes - it only
@@ -304,11 +312,17 @@ public class VideoPlayerModel implements PlaybackModel {
         }
 
         if (!clock.isStarted()) {
-            // First frame since start/seek: anchor the clock to it so it is due right now. The pipeline has had
-            // its pre-roll and later frames are scheduled relative to this one. Shown even when paused, as before.
+            // First frame since start/seek. When paused, show it straight away, as the original did. Otherwise wait
+            // for the pre-roll, then anchor the clock so this frame is due right now and later frames follow it.
+            if (!pauseRequested && !prerollComplete(queue, now)) {
+                return;
+            }
+            epochFirstMediaUs = frame.mediaTimestampUs();
             clock.startAt(frame.mediaTimestampUs(), now);
         } else if (!clock.isDue(frame.mediaTimestampUs(), now)) {
             return;
+        } else {
+            slipIfLate(frame, now);
         }
 
         queue.poll();
@@ -324,10 +338,50 @@ public class VideoPlayerModel implements PlaybackModel {
         }
     }
 
+    // Pre-roll: start the clock only once the first batch of frames - one per worker - is ready, not just the first
+    // frame. The workers process that batch in parallel so it costs almost no extra start-up time, but it gives the
+    // display a cushion: otherwise frame 2 is usually due before its worker has finished it. Gives up waiting after
+    // MAX_PREROLL_WAIT_NS, or when the queue holds the end of the media.
+    private boolean prerollComplete(BlockingQueue<VideoDecoder.PresentationItem<Image>> queue, long now) {
+        if (now - epochStartedNs > MAX_PREROLL_WAIT_NS) {
+            return true;
+        }
+        int wanted = Math.min(workerCount, queue.size() + queue.remainingCapacity());
+        int ready = 0;
+        for (VideoDecoder.PresentationItem<Image> item : queue) { // Weakly consistent iteration: thread-safe.
+            if (item.epoch() != epoch) {
+                continue;
+            }
+            if (!(item instanceof VideoDecoder.DecodedFrame<Image> frame)) {
+                return true; // End of media (or an error) is already queued: nothing more to wait for.
+            }
+            if (!frame.processed().isDone()) {
+                break;
+            }
+            if (++ready >= wanted) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // A frame shown later than its slot must still stay on screen for a full frame period. If we instead raced
+    // through the backlog to catch up, the frames behind it would each flash up for a single screen refresh and,
+    // to a viewer (or a screen-capturing test), be dropped. So when we are more than half a frame late, the clock
+    // slips back by the lateness: playback is momentarily delayed but every frame is shown properly. (Lateness under
+    // half a frame is normal: frames can only change on a screen refresh, which at 60Hz is every 16.7ms.)
+    private void slipIfLate(VideoDecoder.DecodedFrame<Image> frame, long now) {
+        long frameDurationNs = videoFrameDurationUs * 1_000L;
+        long lateNs = now - clock.targetTimeNs(frame.mediaTimestampUs());
+        if (frameDurationNs > 0 && lateNs > frameDurationNs / 2) {
+            clock.delay(lateNs);
+        }
+    }
+
     private void displayFrame(
             VideoDecoder.DecodedFrame<Image> frame,
             FrameProcessingPipeline.ProcessedFrame<Image> processed) {
-        currentTimestampUs = logicalPlaybackBaseUs + Math.max(0, frame.mediaTimestampUs() - clock.anchorMediaUs());
+        currentTimestampUs = logicalPlaybackBaseUs + Math.max(0, frame.mediaTimestampUs() - epochFirstMediaUs);
         relativeSeekBaseUs = NO_SEEK_REQUEST;
 
         // Dump some logging to the console once per second so that real time performance can be monitored. As in

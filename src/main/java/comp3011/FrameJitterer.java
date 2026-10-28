@@ -4,7 +4,7 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *   2. 
  *      - Made safe for concurrent process() calls: the source-pixel scratch buffer is now per thread.
  *
  * Copyright 2026 Simon Ratcliffe

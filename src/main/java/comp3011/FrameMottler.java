@@ -4,7 +4,7 @@
  * 
  * Authors:
  *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *   2. 
  *      - Made safe for concurrent process() calls: the damage-mask cache is now per thread, and the per-block
  *        channel scale indices are passed in a call-local array instead of instance fields. Arithmetic unchanged.
  *
