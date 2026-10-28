@@ -1,17 +1,21 @@
 /*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- *
+  * ATTRIBUTION HEADING
  * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *   1. In some files: Simon Ratcliffe, in collaboration with GPT-5.6 Terra 
+ *   2. Loran Webber a1826273, production helped by Claude, which did:
+ *   (a) File structure with project folder (correct nesting)
+ *   (b) Debugging after multiple failed TITAN tests with no way fowards
+ *   (c) Final check of all SOLID principles that may have been missed after own review
+ *   (d) Formatting this header structure, and for comments that had visual/ascii components
+ *   (e) ReadMe file writeup
+ *   Claude was not used in any other way
+ *
  *      - Re-engineered as the multi-threaded model. The original single threaded implementation now lives,
  *        unchanged in behaviour, in SingleThreadedVideoPlayerModel. Public behaviour (seeking rules, pause,
  *        start over, end of playback, audio toggling, status messages) is preserved from the original; decoding,
  *        effects and audio output have moved to PlaybackSession's threads, leaving this class to coordinate them
  *        and display frames on the JavaFX application thread.
  *
- * Copyright 2026 Simon Ratcliffe
  */
 // coordinates playback on the JavaFX thread while decoding and effects happen elsewhere. This keeps the controls responsive during expensive processing.
 package comp3011;

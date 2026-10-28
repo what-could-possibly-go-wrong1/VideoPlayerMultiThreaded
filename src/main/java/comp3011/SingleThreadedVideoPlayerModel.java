@@ -1,16 +1,20 @@
 /*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
+ * ATTRIBUTION HEADING
  * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *   1. In some files: Simon Ratcliffe, in collaboration with GPT-5.6 Terra 
+ *   2. Loran Webber a1826273, production helped by Claude, which did:
+ *   (a) File structure with project folder (correct nesting)
+ *   (b) Debugging after multiple failed TITAN tests with no way fowards
+ *   (c) Final check of all SOLID principles that may have been missed after own review
+ *   (d) Formatting this header structure, and for comments that had visual/ascii components
+ *   (e) ReadMe file writeup
+ *   Claude was not used in any other way
+ *
  *      - Renamed from VideoPlayerModel and kept as the single threaded REFERENCE implementation, selectable with
  *        the hidden --single-threaded switch. Playback logic deliberately left as supplied so that it remains a
  *        faithful baseline for frame-correctness and performance comparison with the multi-threaded VideoPlayerModel.
  *      - Implements PlaybackModel; effects now come from the command line instead of being hard coded.
- *
- * Copyright 2026 Simon Ratcliffe
+
  */
 // retains the original playback approach for comparison with the concurrent version. It also gives the tests a reference for frame correctness.
 package comp3011;

@@ -1,14 +1,19 @@
 /*
- * Starter code supplied for Adelaide University COMP3011 Assignment 2.
- * Students are free to modify this file for assessment purposes.
- * 
+ * ATTRIBUTION HEADING
  * Authors:
- *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
- *   2. 
+ *   1. In some files: Simon Ratcliffe, in collaboration with GPT-5.6 Terra 
+ *   2. Loran Webber a1826273, production helped by Claude, which did:
+ *   (a) File structure with project folder (correct nesting)
+ *   (b) Debugging after multiple failed TITAN tests with no way fowards
+ *   (c) Final check of all SOLID principles that may have been missed after own review
+ *   (d) Formatting this header structure, and for comments that had visual/ascii components
+ *   (e) ReadMe file writeup
+ *   
+ *    Claude was not used for code generation in any other way
+ *
  *      - Made safe for concurrent process() calls: the damage-mask cache is now per thread, and the per-block
  *        channel scale indices are passed in a call-local array instead of instance fields. Arithmetic unchanged.
- *
- * Copyright 2026 Simon Ratcliffe
+ 
  */
 // implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
