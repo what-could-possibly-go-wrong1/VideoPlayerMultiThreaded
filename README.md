@@ -1,9 +1,7 @@
 # COMP3011 Assignment 2 - Multi-threaded Video Player
 
-For more information on this code and how to get started, see https://learn.adelaide.edu.au/courses/30747/assignments/94505
-
 Starter code by Simon Ratcliffe (in collaboration with GPT-5.6 Terra). Modifications and new files by
-`<Student Name> (<Student Number>)`, in collaboration with Claude (Anthropic). Every modified source file says what
+Loran Webber (a1826273) in collaboration with Claude (the latter helping with folder organisation and structure for correct nesting, debugging help when TITAN run tests failed multiple times with no solution, final checking of all SOLID principles that may have been missed during manual checking, formatting of header structures and for comments that had ASCII within them, this ReadMe file writeup for formatting and clarity). Every modified source file says what
 changed in its header; every new file is marked as new.
 
 ---
