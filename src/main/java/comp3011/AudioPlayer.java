@@ -9,6 +9,7 @@
  *   (d) Formatting this header structure, and for comments that had visual/ascii components
  *   (e) ReadMe file writeup
  *   Claude was not used in any other way
+ *   - Added writeBlocking for use from the dedicated AudioOutput thread; documented thread confinement.
  *
  */
 // handles sound playback separately from frame effects so video processing doesn't block audio output.

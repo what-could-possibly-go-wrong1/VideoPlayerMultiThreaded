@@ -9,7 +9,10 @@
  *   (d) Formatting this header structure, and for comments that had visual/ascii components
  *   (e) ReadMe file writeup
  *   Claude was not used in any other way
- *
+ *- Spec Part 1: frame processor options (long, short and stacked short forms), applied in command-line
+ *        order and repeatable; help text extended exactly as specified.
+ *      - Parsing split into small single-purpose methods; output stream injectable for regression testing.
+ *      - Hidden, out-of-spec --single-threaded switch selecting the original reference playback model.
  */
 // parses launch options and retains the effect order, including repeated options, so the processing sequence matches what the user requested.
 package comp3011;
