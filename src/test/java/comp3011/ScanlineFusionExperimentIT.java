@@ -1,135 +1,205 @@
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Record of an optimisation that was evaluated and rejected, run by "mvn verify".
+ */
 package comp3011;
- 
-import static org.junit.jupiter.api.Assertions.*;
- 
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import java.io.File;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.*;
- 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
 import org.bytedeco.javacv.Frame;
 import org.junit.jupiter.api.Test;
- 
-/*
- * experiment: does "scanline fusion" make effects faster?
+
+/**
+ * An experiment, kept as a test: would <i>scanline fusion</i> make the effects faster?
  *
- * normal:  effect1 does whole frame, then effect2 does whole frame, ...   (frame goes thru memory N times)
- * fused:   do ALL effects on 8 rows (fits in cache), then next 8 rows, ... (frame goes thru memory once)
+ * <h2>The idea</h2>
+ * <p>
+ * Each effect normally sweeps the whole frame (4.6 MB for HD) before the next one starts, so a chain such as
+ * {@code -fwy} streams the frame through memory three times. Several effects are <i>per-pixel</i>: a pixel's new
+ * value depends only on its own old value. For those, the chain can instead be applied to one narrow band of
+ * scanlines at a time - small enough to stay in the CPU's cache - before moving to the next band, so the frame
+ * crosses the memory bus once instead of once per effect. This is the classic loop-fusion / cache-blocking
+ * optimisation.
+ * </p>
  *
- * only valid for PER-PIXEL effects that dont care where the pixel is (flicker, b&w, yellow)
- * vignette DOES care where it is (dist from centre) -> cant fuse like this -> 2nd test proves that
+ * <h2>How it is tested without touching the effects</h2>
+ * <p>
+ * The real, unmodified effect classes are run on <i>band views</i>: {@link Frame}s whose pixel buffer is a
+ * zero-copy slice of the full frame covering {@value #BAND_ROWS} rows. The effects are simply initialised with
+ * the band's height. No effect code is duplicated, so the fused result must be pixel-identical - which this test
+ * asserts.
+ * </p>
  *
- * trick: dont rewrite the effects. just hand the REAL effects a fake small Frame ("band view")
- * that points into the same memory (zero copy). init them with height=8.
+ * <h2>Where it is not valid</h2>
+ * <p>
+ * Band views hide each row's true position. That is harmless for flicker, black-and-white and yellow, but the
+ * vignette darkens by distance from the frame centre, so in a band view every band would be vignetted as if it were
+ * a whole frame. The second test proves the experiment can tell the difference: fusing the vignette this way
+ * changes the output. A real implementation would need position-aware effects - a new effect API.
+ * </p>
  *
- * result: ~0.96x - 1.15x. basically nothing. effects are compute bound (lookup/maths per byte),
- * NOT memory bound. so not worth a new effect api + duplicate code -> rejected. (see README)
- * timings only printed, not asserted (differs per machine). correctness IS asserted.
+ * <h2>Finding (recorded in README.md, "Optimisations evaluated")</h2>
+ * <p>
+ * Measured on HD frames there is little or nothing to gain: from about 0.96x (slightly slower - calling every effect
+ * once per band costs as much as the cache saves) to about 1.15x for a hand-written fused loop. These effects are
+ * compute-bound (a table lookup or arithmetic per byte), not memory-bound, so streaming the frame through memory
+ * was never the bottleneck. That does not justify a new effect API and a second code path through every per-pixel
+ * effect, so fusion was not adopted.
+ * The test asserts correctness only; the timings are reported (and written to
+ * {@code target/scanline-fusion-report.txt}) rather than asserted, as they vary from machine to machine.
+ * </p>
  */
 class ScanlineFusionExperimentIT {
-    static final int BAND = 8;          // 8 HD rows ~ 46KB, fits L2 easy
-    static final int REEL_LEN = 24;
-    static final int PASSES = 3;
- 
-    static final String OK_TO_FUSE = "fwy";     // flicker, b&w, yellow  (bit of titans "...sfwyvd...")
-    static final String NOT_OK = "fwyv";        // + vignette = position dependent
- 
+    private static final int BAND_ROWS = 8; // 8 HD rows = 46 KB: comfortably inside a typical per-core L2 cache.
+    private static final int REEL_LENGTH = 24;
+    private static final int TIMED_PASSES = 3;
+
+    // Per-pixel and position-independent: the run "fwy" from TITAN's stress chains "...sfwyvd...".
+    private static final String FUSABLE_RUN = "fwy";
+    // Same run plus the vignette, which depends on each pixel's position in the full frame.
+    private static final String POSITION_DEPENDENT_RUN = "fwyv";
+
     @Test
-    void scanlineFusionIsPixelIdenticalButGainsLittle() throws Exception
-    {
+    void scanlineFusionIsPixelIdenticalButGainsLittle() throws Exception {
         EffectCostLedgerIT.Reel reel = hdReel();
-        List<FrameProcessor> fx = FrameProcessingPipelineTest.effects(OK_TO_FUSE);
- 
-        Outcome normal = wholeFrames(fx, reel);
-        Outcome fused  = inBands(fx, reel);
- 
-        assertEquals(normal.prints(), fused.prints(), "fusing per-pixel effects band by band must not change a single pixel");
- 
-        double x = normal.ms() / fused.ms();
-        String rep = String.format(Locale.ROOT, """
+        List<FrameProcessor> effects = FrameProcessingPipelineTest.effects(FUSABLE_RUN);
+
+        Outcome wholeFrame = sweepWholeFrames(effects, reel);
+        Outcome banded = sweepScanlineBands(effects, reel);
+
+        assertEquals(wholeFrame.fingerprints(), banded.fingerprints(),
+                "fusing per-pixel effects band by band must not change a single pixel");
+
+        double speedUp = wholeFrame.millisPerFrame() / banded.millisPerFrame();
+        String report = String.format(Locale.ROOT, """
                 Scanline fusion experiment, effects -%s on %dx%d frames (%d-row bands, best of %d passes):
                   each effect sweeps the whole frame : %6.2f ms/frame
                   all effects per %d-row band        : %6.2f ms/frame
                   speed-up                           : %4.2fx  (pixel-identical: yes)
                   conclusion: compute-bound, not memory-bound - too small a gain to justify a new effect API.
-                """, OK_TO_FUSE, reel.width(), reel.height(), BAND, PASSES, normal.ms(), BAND, fused.ms(), x);
-        System.out.print(rep);
-        Files.writeString(new File("target/scanline-fusion-report.txt").toPath(), rep);
+                """, FUSABLE_RUN, reel.width(), reel.height(), BAND_ROWS, TIMED_PASSES,
+                wholeFrame.millisPerFrame(), BAND_ROWS, banded.millisPerFrame(), speedUp);
+        System.out.print(report);
+        Files.writeString(new File("target/scanline-fusion-report.txt").toPath(), report);
     }
- 
-    // negative control!! if this ever comes out EQUAL the experiment isnt testing what it says
+
     @Test
     void bandViewsCannotFusePositionDependentEffects() throws Exception {
         EffectCostLedgerIT.Reel reel = hdReel();
-        List<FrameProcessor> fx = FrameProcessingPipelineTest.effects(NOT_OK);
-        assertNotEquals(wholeFrames(fx, reel).prints(), inBands(fx, reel).prints(),
-                "vignette depends on row position so band views must change it");
+        List<FrameProcessor> effects = FrameProcessingPipelineTest.effects(POSITION_DEPENDENT_RUN);
+
+        Outcome wholeFrame = sweepWholeFrames(effects, reel);
+        Outcome banded = sweepScanlineBands(effects, reel);
+
+        assertNotEquals(wholeFrame.fingerprints(), banded.fingerprints(),
+                "the vignette depends on each row's position, so band views must change its output - if this "
+                        + "ever passes as equal, the experiment has stopped testing what it claims to");
     }
- 
-    static EffectCostLedgerIT.Reel hdReel() throws Exception {
-        File vid = TestFrames.generateVideo(new File("target/test-media/hd-load-test.mp4"), 1920, 800, 96, true);
-        EffectCostLedgerIT.Reel r = EffectCostLedgerIT.Reel.decode(vid, REEL_LEN);
-        assertTrue(r.height() % BAND == 0, "height must split into whole bands");
-        return r;
+
+    private static EffectCostLedgerIT.Reel hdReel() throws Exception {
+        File video = TestFrames.generateVideo(new File("target/test-media/hd-load-test.mp4"), 1920, 800, 96, true);
+        EffectCostLedgerIT.Reel reel = EffectCostLedgerIT.Reel.decode(video, REEL_LENGTH);
+        assertTrue(reel.height() % BAND_ROWS == 0, "test video height must be a whole number of bands");
+        return reel;
     }
- 
-    // normal way
-    static Outcome wholeFrames(List<FrameProcessor> fx, EffectCostLedgerIT.Reel reel) throws Exception {
-        for (FrameProcessor e : fx) e.initialise(reel.videoInfo());
-        return bestOf(reel, i -> {
-            Frame f = reel.workingFrame(i); InfoFrame inf = reel.frameInfo(i);
-            for (FrameProcessor e : fx) e.process(f, inf);
-        });
-    }
- 
-    // fused way. SAME effect objects -> same random seeds (instanceIndex), just re-init'd as 8 rows tall
-    static Outcome inBands(List<FrameProcessor> fx, EffectCostLedgerIT.Reel reel) throws Exception
-    {
-        InfoVideo v = reel.videoInfo();
-        InfoVideo bandSized = new InfoVideo(v.mediaName(), v.totalVideoFrames(), v.imageWidth(), BAND,
-                v.imageDepth(), v.imageChannels(), v.imageStride(), v.frameRate(), v.intFrameRate(),
-                v.frameDurationUs(), v.pixelFormat());
-        for (FrameProcessor e : fx) e.initialise(bandSized);
- 
-        return bestOf(reel, i -> {
-            Frame f = reel.workingFrame(i); InfoFrame inf = reel.frameInfo(i);
-            for (int row = 0; row < f.imageHeight; row += BAND) {
-                Frame band = bandView(f, row);
-                for (FrameProcessor e : fx) e.process(band, inf);
+
+    // The normal way: each effect processes the entire frame before the next effect starts.
+    private static Outcome sweepWholeFrames(List<FrameProcessor> effects, EffectCostLedgerIT.Reel reel)
+            throws Exception {
+        for (FrameProcessor effect : effects) {
+            effect.initialise(reel.videoInfo());
+        }
+        return timeBestPass(reel, frameIndex -> {
+            Frame frame = reel.workingFrame(frameIndex);
+            InfoFrame info = reel.frameInfo(frameIndex);
+            for (FrameProcessor effect : effects) {
+                effect.process(frame, info);
             }
         });
     }
- 
-    // fake little Frame that SHARES the big frame's memory (no copying)
-    static Frame bandView(Frame f, int row) {
-        ByteBuffer px = ((ByteBuffer) f.image[0]).duplicate();
-        px.clear().position(row * f.imageStride).limit((row + BAND) * f.imageStride);
-        Frame b = new Frame();
-        b.imageWidth = f.imageWidth;  b.imageHeight = BAND;
-        b.imageDepth = f.imageDepth;  b.imageChannels = f.imageChannels;  b.imageStride = f.imageStride;
-        b.image = new Buffer[]{ px.slice() };
-        return b;
-    }
- 
-    // warmup, then fastest of PASSES. fingerprints taken after timing stops
-    static Outcome bestOf(EffectCostLedgerIT.Reel reel, Step step) throws Exception {
-        reel.rewind(); all(reel, step);
-        double best = Double.MAX_VALUE;
-        for (int p=0; p<PASSES; p++) {
-            reel.rewind();
-            long t0 = System.nanoTime();
-            all(reel, step);
-            best = Math.min(best, (System.nanoTime()-t0)/1e6);
+
+    // The fused way: every effect processes one cache-sized band before the next band is touched.
+    private static Outcome sweepScanlineBands(List<FrameProcessor> effects, EffectCostLedgerIT.Reel reel)
+            throws Exception {
+        InfoVideo full = reel.videoInfo();
+        InfoVideo bandShaped = new InfoVideo(full.mediaName(), full.totalVideoFrames(), full.imageWidth(), BAND_ROWS,
+                full.imageDepth(), full.imageChannels(), full.imageStride(), full.frameRate(), full.intFrameRate(),
+                full.frameDurationUs(), full.pixelFormat());
+        for (FrameProcessor effect : effects) {
+            effect.initialise(bandShaped); // Same instances, so the same per-instance random seeds.
         }
-        List<String> prints = new ArrayList<>();
-        for (int i=0; i<reel.length(); i++) prints.add(TestFrames.sha1(reel.workingFrame(i)));
-        return new Outcome(best / reel.length(), prints);
+        return timeBestPass(reel, frameIndex -> {
+            Frame frame = reel.workingFrame(frameIndex);
+            InfoFrame info = reel.frameInfo(frameIndex);
+            for (int firstRow = 0; firstRow < frame.imageHeight; firstRow += BAND_ROWS) {
+                Frame band = bandView(frame, firstRow);
+                for (FrameProcessor effect : effects) {
+                    effect.process(band, info);
+                }
+            }
+        });
     }
- 
-    static void all(EffectCostLedgerIT.Reel reel, Step step) throws Exception { for (int i=0;i<reel.length();i++) step.apply(i); }
- 
-    interface Step { void apply(int i) throws Exception; }
-    record Outcome(double ms, List<String> prints) {}
+
+    // A Frame that looks like a short image but shares (does not copy) the full frame's pixel memory.
+    private static Frame bandView(Frame frame, int firstRow) {
+        ByteBuffer pixels = ((ByteBuffer) frame.image[0]).duplicate();
+        pixels.clear()
+                .position(firstRow * frame.imageStride)
+                .limit((firstRow + BAND_ROWS) * frame.imageStride);
+        Frame band = new Frame();
+        band.imageWidth = frame.imageWidth;
+        band.imageHeight = BAND_ROWS;
+        band.imageDepth = frame.imageDepth;
+        band.imageChannels = frame.imageChannels;
+        band.imageStride = frame.imageStride;
+        band.image = new Buffer[] { pixels.slice() };
+        return band;
+    }
+
+    // Warm-up pass, then the fastest of several timed passes. Every pass starts from the pristine reel. The
+    // fingerprints are taken from the last pass, after timing has stopped.
+    private static Outcome timeBestPass(EffectCostLedgerIT.Reel reel, FrameStep step) throws Exception {
+        reel.rewind();
+        runPass(reel, step);
+        double fastestMs = Double.MAX_VALUE;
+        for (int pass = 0; pass < TIMED_PASSES; pass++) {
+            reel.rewind();
+            long started = System.nanoTime();
+            runPass(reel, step);
+            fastestMs = Math.min(fastestMs, (System.nanoTime() - started) / 1e6);
+        }
+        List<String> fingerprints = new ArrayList<>();
+        for (int i = 0; i < reel.length(); i++) {
+            fingerprints.add(TestFrames.sha1(reel.workingFrame(i)));
+        }
+        return new Outcome(fastestMs / reel.length(), fingerprints);
+    }
+
+    private static void runPass(EffectCostLedgerIT.Reel reel, FrameStep step) throws Exception {
+        for (int i = 0; i < reel.length(); i++) {
+            step.apply(i);
+        }
+    }
+
+    @FunctionalInterface
+    private interface FrameStep {
+        void apply(int frameIndex) throws Exception;
+    }
+
+    private record Outcome(double millisPerFrame, List<String> fingerprints) {
+    }
 }
- 

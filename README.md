@@ -83,21 +83,28 @@ sit idle.
 |---|---|---|
 | JavaFX application thread | `VideoPlayerModel` | GUI and user commands; on each heartbeat, shows the head frame of the presentation queue if it is finished and due. Never decodes or processes. |
 | `video-decoder` | `VideoDecoder` | Sole owner of the FFmpeg grabber. Decodes, copies each picture into a pooled frame, submits it to the workers, publishes a `DecodedFrame` (holding a future) **in decode order**. Routes sound to the audio thread. Serves seeks. |
-| `frame-worker-N` (one per core; one core kept free on 4+ cores) | `FrameProcessingPipeline` | Runs the **whole** effect chain, in command-line order, on one frame, then converts it to a JavaFX `Image`. Different frames run on different cores at once. |
+| `frame-worker-N` (one per core, less 1-2 kept free) | `FrameProcessingPipeline` | Runs the **whole** effect chain, in command-line order, on one frame, then converts it to a JavaFX `Image`. Different frames run on different cores at once. |
 | `audio-output` | `AudioOutput` | Waits on the clock until each sound chunk is due, then writes it (blocking writes are fine on its own thread). |
 
 **Keeping the screen smooth.** Preparing frames quickly is not enough: JavaFX must also get CPU time to draw
-them, or frames are visibly dropped even though they were ready. So on machines with 4 or more cores the design leaves one core free
-(workers = cores - 1), and on all machines it runs the effect workers below normal priority and the decoder just below normal, and gives the
+them, or frames are visibly dropped even though they were ready. So the design leaves cores free for everything else: two on machines with
+8+ cores, one on 4-7 cores. (On TITAN's 8-core machine under heavy outside load, keeping only one core free let
+overload show up as dropped frames; the second free core is there so that overload makes the player fall behind
+gracefully instead, with every frame still shown.) On all machines it runs the effect workers below normal priority and the decoder just below normal, and gives the
 (lightweight) audio thread above-normal priority. The GUI and render threads therefore always win the CPU when
 they need it, and the effects soak up whatever is left. The look-ahead buffer is capped at about one second
 (24 frames) to bound memory use.
 
 Two display rules complete this (`VideoPlayerModel.prerollComplete` and `slipIfLate`):
 
-* **Pre-roll:** the clock starts only once the first batch of frames - one per worker - is ready. The workers
-  process that batch in parallel, so it costs almost no start-up time, but frame 2 is no longer due before its
-  worker has finished it.
+* **Pre-roll:** the clock starts only once two frames per worker are ready. Each batch is processed in parallel,
+  so this costs only a fraction of a second, but it cushions a slow start (busy machine, cold JIT): the first frames
+  are no longer due before their workers have finished them.
+* **Display threads first:** the JavaFX application and render threads are raised to the highest priority short of
+  `MAX_PRIORITY`
+  (`DisplayThreadPriority`). Lowering our own heavy threads keeps *them* out of the way, but on a shared machine
+  other programs compete too; this lets drawing win against those as well. It was added after TITAN, on a busy
+  evening, reported dropped frames that our own threads could not have caused.
 * **Slip, don't rush:** if a frame is ever shown more than half a frame late, the schedule slips back by the
   lateness instead of racing through the backlog. Racing would put frames on screen for a single 16.7 ms refresh,
   which looks (and to TITAN's screen capture, measures) like dropped frames. Measured under overload on a 2-core
