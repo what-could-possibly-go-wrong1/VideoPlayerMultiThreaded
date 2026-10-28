@@ -1,3 +1,11 @@
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Takes over openPlaybackResources / closePlaybackResources from the single threaded design.
+ */
 // groups playback resources and worker threads so startup, seeking and shutdown have one owner instead of being scattered through the model.
 package comp3011;
 
@@ -14,22 +22,22 @@ import org.bytedeco.javacv.JavaFXFrameConverter;
 import javafx.scene.image.Image;
 
 /**
- * Everything that exists for one continuous run of the media file   from opening it until stop, error or end of
- * playback   and the threads that work on it:
+ * Everything that exists for one continuous run of the media file - from opening it until stop, error or end of
+ * playback - and the threads that work on it:
  *
  * <pre>
- *                      +                    +   AudioChunk    +                  +
- *                 +   >|   audio samples    |                >|  audio output    |   > speakers
- *                 |    +                    +   (queue)       |  thread          |
- *  +                 +                                        +                  +
- *  |  video decoder  |   pooled frame copy   +                       +                   ^
- *  |  thread         |                      >|  frame worker N       |  effects + Image  |  PlaybackClock
- *  |  (owns FFmpeg)  |       (executor)      |  threads (one per     |      +            |  (shared)
- *  +                 +                       |  core)                |      |            v
- *           |                                +                       +      |   +                  +
- *           |  DecodedFrame(future), in decode order                        +  >|  JavaFX thread   |   > screen
- *           +                                                                >  |  (display, GUI)  |
- *                         bounded presentation queue                           +                  +
+ *                      +--------------------+   AudioChunk    +------------------+
+ *                 +--->|   audio samples    |---------------->|  audio-output    |---> speakers
+ *                 |    +--------------------+   (queue)       |  thread          |
+ *  +-----------------+                                        +------------------+
+ *  |  video-decoder  |   pooled frame copy   +-----------------------+                   ^
+ *  |  thread         |---------------------->|  frame-worker-N       |  effects + Image  |  PlaybackClock
+ *  |  (owns FFmpeg)  |       (executor)      |  threads (one per     |------+            |  (shared)
+ *  +-----------------+                       |  core)                |      |            v
+ *           |                                +-----------------------+      |   +------------------+
+ *           |  DecodedFrame(future), in decode order                        +-->|  JavaFX thread   |---> screen
+ *           +---------------------------------------------------------------->  |  (display, GUI)  |
+ *                         bounded presentation queue                           +------------------+
  * </pre>
  *
  * <p>
@@ -44,7 +52,7 @@ import javafx.scene.image.Image;
  */
 final class PlaybackSession implements AutoCloseable {
     // Frames decoded ahead of display, per worker thread. Two per worker keeps every core busy while also absorbing
-    // variation in per frame effect cost; the cap bounds memory use (each buffered HD frame is several MB).
+    // variation in per-frame effect cost; the cap bounds memory use (each buffered HD frame is several MB).
     private static final int BUFFERED_FRAMES_PER_WORKER = 2;
     private static final int MIN_BUFFERED_FRAMES = 6;
     private static final int MAX_BUFFERED_FRAMES = 24; // About one second of 24 fps video.
@@ -77,7 +85,7 @@ final class PlaybackSession implements AutoCloseable {
         durationUs = grabber.getLengthInTime();
 
         // JavaFXFrameConverter holds no state (it copies the pixels into a new WritableImage), so one instance can be
-        // shared by all workers; creating Images off the JavaFX thread is permitted   only showing them is not.
+        // shared by all workers; creating Images off the JavaFX thread is permitted - only showing them is not.
         JavaFXFrameConverter converter = new JavaFXFrameConverter();
         pipeline = new FrameProcessingPipeline<>(frameProcessors, workerCount, converter::convert);
 
@@ -107,7 +115,7 @@ final class PlaybackSession implements AutoCloseable {
     }
 
     /**
-     * Opens the media and prepares (but does not start) the sessions threads.
+     * Opens the media and prepares (but does not start) the session's threads.
      *
      * @param startTimestampUs where to start decoding
      * @param epoch the clock epoch the first decoded frames belong to
@@ -198,7 +206,7 @@ final class PlaybackSession implements AutoCloseable {
     /**
      * Stops every thread of this session, then releases its resources. The order matters: the decoder thread must
      * have finished before its grabber is closed (it may be inside a native grab call), and the workers must have
-     * finished before the effects can be safely re initialised by a following session.
+     * finished before the effects can be safely re-initialised by a following session.
      */
     @Override
     public void close() {
@@ -229,12 +237,12 @@ final class PlaybackSession implements AutoCloseable {
         try {
             grabber.stop();
         } catch (Exception e) {
-            // the resource is being closed; there is no useful recovery action.
+            // The resource is being closed; there is no useful recovery action.
         }
         try {
             grabber.close();
         } catch (Exception e) {
-            // the resource is being closed; there is no useful recovery action.
+            // The resource is being closed; there is no useful recovery action.
         }
     }
 

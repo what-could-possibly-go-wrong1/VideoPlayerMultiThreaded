@@ -1,4 +1,12 @@
-// runs the full ordered effect chain on separate frames in parallel. Keeping each frames effects together preserves the original effect order.
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Replaces VideoPlayerModel.processFrame / converter.convert from the single threaded design.
+ */
+// runs the full ordered effect chain on separate frames in parallel. Keeping each frame's effects together preserves the original effect order.
 package comp3011;
 
 import java.util.List;
@@ -18,21 +26,21 @@ import org.bytedeco.javacv.Frame;
  * renders each finished frame into the form the consumer wants (a JavaFX {@code Image} for the player, or a pixel
  * hash in the tests).
  *
- * <h2>Design: frame level data parallelism</h2>
+ * <h2>Design: frame-level data parallelism</h2>
  * <p>
- * Each submitted frame becomes one task that runs <i>the whole effect chain, in command line order</i>, on one worker
+ * Each submitted frame becomes one task that runs <i>the whole effect chain, in command-line order</i>, on one worker
  * thread. Different frames are processed simultaneously on different cores. This was chosen over the alternatives:
  * </p>
  * <ul>
- * <li><b>Task (effect) pipelining</b>   one thread per effect, frames flowing between them   is limited by the
- * slowest effect (e.g. bleeding is many times slower than black and white), cannot use more cores than there are
- * effects, and costs a hand off per effect per frame.</li>
- * <li><b>Intra frame tiling</b>   splitting one frame into strips   does not work for effects that read
+ * <li><b>Task (effect) pipelining</b> - one thread per effect, frames flowing between them - is limited by the
+ * slowest effect (e.g. bleeding is many times slower than black-and-white), cannot use more cores than there are
+ * effects, and costs a hand-off per effect per frame.</li>
+ * <li><b>Intra-frame tiling</b> - splitting one frame into strips - does not work for effects that read
  * neighbouring pixels (jitter, bleed blur) without rewriting them, and synchronises every effect.</li>
  * </ul>
  * <p>
- * Frame level parallelism scales with the number of cores, leaves effect code nearly untouched, and keeps the exact
- * per frame order of effects   so output is pixel identical to the single threaded player. It adds latency (a frame
+ * Frame-level parallelism scales with the number of cores, leaves effect code nearly untouched, and keeps the exact
+ * per-frame order of effects - so output is pixel-identical to the single threaded player. It adds latency (a frame
  * takes the full chain time to emerge), which the player hides by buffering ahead and by anchoring its clock only
  * once the first frame is ready (see {@link PlaybackClock}).
  * </p>
@@ -41,10 +49,10 @@ import org.bytedeco.javacv.Frame;
  * <p>
  * Tasks may finish out of order. {@link #submit} returns a {@link CompletableFuture} immediately, and the caller
  * keeps the futures in decode order (the player uses a FIFO presentation queue) and consumes them in that order. This
- * re sequences frames without any locking in this class.
+ * re-sequences frames without any locking in this class.
  * </p>
  *
- * <h2>Thread safety requirements on effects</h2>
+ * <h2>Thread-safety requirements on effects</h2>
  * <p>
  * Because two workers may call {@code process} on the <i>same</i> effect instance for different frames at the same
  * time, every {@link FrameProcessor} must be safe for concurrent {@code process} calls once initialised (see the
@@ -77,17 +85,17 @@ public final class FrameProcessingPipeline<T> implements AutoCloseable {
     }
 
     /**
-     * The default: one worker per available core, less the cores kept free for everything else the player needs   two
+     * The default: one worker per available core, less the cores kept free for everything else the player needs - two
      * on machines with eight or more cores, one on machines with four to seven.
      */
     public static int defaultWorkerCount() {
-        // if every core is busy applying effects, the JavaFX render thread cannot redraw the screen on time and
-        // frames are visibly dropped, however fast they were prepared. The free cores also absorb the decoders own
-        // FFmpeg threads, garbage collection and   on a shared machine   other programs. On TITANs 8 core machine
+        // If every core is busy applying effects, the JavaFX render thread cannot redraw the screen on time and
+        // frames are visibly dropped, however fast they were prepared. The free cores also absorb the decoder's own
+        // FFmpeg threads, garbage collection and - on a shared machine - other programs. On TITAN's 8-core machine
         // under heavy outside load, keeping only one core free let overload show up as dropped frames; a second free
         // core is meant to make the player fall behind gracefully instead (every frame still shown), which is the
         // right way to fail. With fewer than four cores, giving one up would cost too much parallelism, so there the
-        // workers lower thread priority has to suffice.
+        // workers' lower thread priority has to suffice.
         int cores = Runtime.getRuntime().availableProcessors();
         if (cores >= 8) {
             return cores - 2;
@@ -110,7 +118,7 @@ public final class FrameProcessingPipeline<T> implements AutoCloseable {
      * Queues a frame for processing and rendering.
      *
      * @param frame a frame owned by the caller, normally from {@code pool}; ownership passes to the worker
-     * @param info per frame information passed to every effect
+     * @param info per-frame information passed to every effect
      * @param pool where the frame is returned once rendered (may be {@code null} if the frame is not pooled)
      * @param stillWanted checked just before work starts; if it returns false (e.g. the user seeked away while the
      *        frame was queued) the effects are skipped and the future completes with {@code null}
@@ -140,7 +148,7 @@ public final class FrameProcessingPipeline<T> implements AutoCloseable {
         return submit(frame, info, pool, () -> true);
     }
 
-    // runs on a worker thread. Exactly the loop the single threaded model ran inline.
+    // Runs on a worker thread. Exactly the loop the single threaded model ran inline.
     private void applyEffects(Frame frame, InfoFrame info) throws Exception {
         for (FrameProcessor processor : processors) {
             processor.process(frame, info);
@@ -149,7 +157,7 @@ public final class FrameProcessingPipeline<T> implements AutoCloseable {
 
     /**
      * Stops the workers and waits for any frame still being processed to finish, so that on return no effect is
-     * running (making it safe to re initialise the effects for a new playback session).
+     * running (making it safe to re-initialise the effects for a new playback session).
      */
     @Override
     public void close() {

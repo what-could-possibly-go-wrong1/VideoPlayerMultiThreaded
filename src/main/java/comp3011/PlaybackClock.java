@@ -1,26 +1,35 @@
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Generalises the playbackStartNs / firstTimestampUs / pauseStartedNs bookkeeping of the original
+ * single threaded model so it can be shared safely between the display and audio threads.
+ */
 // tracks playback time independently from effect processing so frames can be presented in order without using worker completion time as the timeline.
 package comp3011;
 
 /**
- * Maps media timestamps to wall clock time for one playback run, and is the single point of agreement between the
+ * Maps media timestamps to wall-clock time for one playback run, and is the single point of agreement between the
  * threads that must stay in sync: the JavaFX application thread (which puts video frames on screen) and the
  * {@link AudioOutput} thread (which writes sound to the speakers).
  *
  * <h2>Lifecycle</h2>
  * <ol>
- * <li>{@link #reset(long)}   at the start of playback and on every seek. Each reset opens a new <i>epoch</i>: work
+ * <li>{@link #reset(long)} - at the start of playback and on every seek. Each reset opens a new <i>epoch</i>: work
  * tagged with an older epoch is stale and must be discarded.</li>
- * <li>{@link #startAt(long, long)}   when the first frame of the epoch is ready for display. Anchoring the clock to
+ * <li>{@link #startAt(long, long)} - when the first frame of the epoch is ready for display. Anchoring the clock to
  * the moment the first processed frame is <i>available</i> (rather than when decoding started) means the processing
- * pipeline gets to pre roll before the deadline clock starts ticking.</li>
- * <li>{@link #pause(long)} / {@link #resume(long)}   shifts the anchor by the paused duration.</li>
+ * pipeline gets to pre-roll before the deadline clock starts ticking.</li>
+ * <li>{@link #pause(long)} / {@link #resume(long)} - shifts the anchor by the paused duration.</li>
  * </ol>
  *
  * <h2>Thread safety</h2>
  * <p>
  * Every method is {@code synchronized} on this object; the state is small and the critical sections are a handful
  * of arithmetic operations, so contention is negligible. State changes call {@link #notifyAll()} so the audio thread
- * blocked in {@link #awaitDue(long, long, long)} re evaluates immediately on pause, resume, start or seek, rather
+ * blocked in {@link #awaitDue(long, long, long)} re-evaluates immediately on pause, resume, start or seek, rather
  * than oversleeping.
  * </p>
  */
@@ -51,7 +60,7 @@ public final class PlaybackClock {
         return paused;
     }
 
-    /** Anchors media time {@code mediaUs} to wall clock {@code nowNs}. */
+    /** Anchors media time {@code mediaUs} to wall-clock {@code nowNs}. */
     public synchronized void startAt(long mediaUs, long nowNs) {
         anchorMediaUs = mediaUs;
         anchorNs = nowNs;
@@ -110,7 +119,7 @@ public final class PlaybackClock {
      * Blocks the calling thread until media time {@code mediaUs} is due, less {@code leadNs}, with the clock running.
      *
      * @return {@code true} when due; {@code false} if the clock moved on to another epoch while waiting, meaning the
-     *         callers data is stale and must be dropped.
+     *         caller's data is stale and must be dropped.
      */
     public synchronized boolean awaitDue(long expectedEpoch, long mediaUs, long leadNs) throws InterruptedException {
         while (true) {
@@ -130,4 +139,3 @@ public final class PlaybackClock {
         }
     }
 }
-

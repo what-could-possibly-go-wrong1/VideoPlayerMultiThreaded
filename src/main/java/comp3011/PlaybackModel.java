@@ -1,20 +1,28 @@
-// defines the controls shared by both playback models so the view and controller dont depend on a specific threading design.
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Extracted from the public methods of the original VideoPlayerModel.
+ */
+// defines the controls shared by both playback models so the view and controller don't depend on a specific threading design.
 package comp3011;
 
 import java.io.File;
 
 /**
- * The model part of the video player model view controller architecture, as seen by the
+ * The model part of the video player model-view-controller architecture, as seen by the
  * {@link VideoPlayerController}.
  *
  * <p>
  * There are two implementations:
  * </p>
  * <ul>
- * <li>{@link VideoPlayerModel}   the multi threaded player. This is the default.</li>
- * <li>{@link SingleThreadedVideoPlayerModel}   the original co operative single threaded player, kept unchanged in
- * behaviour as a reference for performance and frame correctness comparison. Selected with the hidden
- * {@code   single threaded} command line switch.</li>
+ * <li>{@link VideoPlayerModel} - the multi-threaded player. This is the default.</li>
+ * <li>{@link SingleThreadedVideoPlayerModel} - the original co-operative single threaded player, kept unchanged in
+ * behaviour as a reference for performance and frame-correctness comparison. Selected with the hidden
+ * {@code --single-threaded} command line switch.</li>
  * </ul>
  *
  * <p>

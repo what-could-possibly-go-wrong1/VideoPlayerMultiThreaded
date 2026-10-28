@@ -1,4 +1,12 @@
-// keeps audio output behind its own interface so the rest of playback doesnt need to know the device details.
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Replaces the queueAudio / writeDueAudio cooperative scheduling of the single threaded model.
+ */
+// keeps audio output behind its own interface so the rest of playback doesn't need to know the device details.
 package comp3011;
 
 import java.util.concurrent.BlockingQueue;
@@ -8,26 +16,26 @@ import java.util.function.BooleanSupplier;
 import org.bytedeco.javacv.Frame;
 
 /**
- * Plays a media files sound track on its own dedicated thread, kept in sync with the video by the shared
+ * Plays a media file's sound track on its own dedicated thread, kept in sync with the video by the shared
  * {@link PlaybackClock}.
  *
  * <p>
- * In the single threaded player, audio was written from the GUI heartbeat using non blocking writes, so any stall of
+ * In the single threaded player, audio was written from the GUI heartbeat using non-blocking writes, so any stall of
  * the GUI thread (heavy effects, window dragging or resizing) was immediately audible as a gap. Here a dedicated
- * {@code audio output} thread waits on the clock until each chunk is due and then performs ordinary blocking writes  
+ * {@code audio-output} thread waits on the clock until each chunk is due and then performs ordinary blocking writes -
  * blocking is now harmless because nothing else runs on this thread.
  * </p>
  *
  * <h2>Threads and shared state</h2>
  * <ul>
- * <li><b>Decoder thread</b> calls {@link #accept}: converts samples (using the {@link AudioPlayer}s conversion
+ * <li><b>Decoder thread</b> calls {@link #accept}: converts samples (using the {@link AudioPlayer}'s conversion
  * buffer, which only the decoder thread touches) and enqueues an immutable {@link AudioChunk}.</li>
  * <li><b>Audio thread</b> takes chunks in order, waits until due, and writes them to the line.</li>
  * <li><b>JavaFX thread</b> calls {@link #flush()} on pause/seek/mute and {@link #close()} at the end.</li>
  * </ul>
  * <p>
- * The hand off is a {@link LinkedBlockingQueue} (thread safe, and it gives happens before from producer to
- * consumer). Chunks are tagged with the clock epoch in which they were decoded; after a seek the clocks epoch moves
+ * The hand-off is a {@link LinkedBlockingQueue} (thread-safe, and it gives happens-before from producer to
+ * consumer). Chunks are tagged with the clock epoch in which they were decoded; after a seek the clock's epoch moves
  * on and stale chunks are dropped instead of being played over the new position.
  * </p>
  */
@@ -50,7 +58,7 @@ public final class AudioOutput implements AutoCloseable, VideoDecoder.AudioSink 
         this.audioEnabled = audioEnabled;
         this.thread = new Thread(this::run, "audio-output");
         this.thread.setDaemon(true);
-        // Above normal: very little CPU, but must be prompt   a late write is an audible gap.
+        // Above normal: very little CPU, but must be prompt - a late write is an audible gap.
         this.thread.setPriority(Thread.NORM_PRIORITY + 2);
     }
 
@@ -58,7 +66,7 @@ public final class AudioOutput implements AutoCloseable, VideoDecoder.AudioSink 
         thread.start();
     }
 
-    /** Decoder thread: queue this frames samples for playback. */
+    /** Decoder thread: queue this frame's samples for playback. */
     @Override
     public void accept(long epoch, long timestampUs, Frame frame) {
         if (!audioEnabled.getAsBoolean()) {
@@ -111,7 +119,7 @@ public final class AudioOutput implements AutoCloseable, VideoDecoder.AudioSink 
             if (!audioEnabled.getAsBoolean()) {
                 return;
             }
-            // Re checked before every slice, so we stop promptly on pause (waits) or seek (stale   dropped).
+            // Re-checked before every slice, so we stop promptly on pause (waits) or seek (stale - dropped).
             if (!clock.awaitDue(chunk.epoch(), chunk.timestampUs(), AUDIO_LEAD_NS)) {
                 return;
             }

@@ -1,3 +1,17 @@
+/*
+ * Starter code supplied for Adelaide University COMP3011 Assignment 2.
+ * Students are free to modify this file for assessment purposes.
+ * 
+ * Authors:
+ *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Renamed from VideoPlayerModel and kept as the single threaded REFERENCE implementation, selectable with
+ *        the hidden --single-threaded switch. Playback logic deliberately left as supplied so that it remains a
+ *        faithful baseline for frame-correctness and performance comparison with the multi-threaded VideoPlayerModel.
+ *      - Implements PlaybackModel; effects now come from the command line instead of being hard coded.
+ *
+ * Copyright 2026 Simon Ratcliffe
+ */
 // retains the original playback approach for comparison with the concurrent version. It also gives the tests a reference for frame correctness.
 package comp3011;
 
@@ -18,18 +32,18 @@ import javafx.application.Platform;
 import javafx.scene.image.Image;
 
 /**
- * <b>Reference implementation   not the default player.</b> This is the original single threaded model, retained
- * so the multi threaded {@link VideoPlayerModel} can be compared against it (run the player with the hidden
- * {@code   single threaded} switch, or see the integration tests). New playback features belong in
+ * <b>Reference implementation - not the default player.</b> This is the original single threaded model, retained
+ * so the multi-threaded {@link VideoPlayerModel} can be compared against it (run the player with the hidden
+ * {@code --single-threaded} switch, or see the integration tests). New playback features belong in
  * {@link VideoPlayerModel}.
  *
  * <p>
- * The model part of the video player model view controller architecture.
+ * The model part of the video player model-view-controller architecture.
  * </p>
  *
  * <p>
  * Owns the FFmpeg decoder, playback clock, seeking logic, audio scheduling,
- * and frame processing   which it all manages through cooperative multi tasking
+ * and frame processing - which it all manages through cooperative multi-tasking
  * on a single thread. It publishes decoded frames and playback state through
  * callbacks supplied by its owning {@link VideoPlayerController}, keeping it
  * decoupled from the JavaFX view.
@@ -48,7 +62,7 @@ public class SingleThreadedVideoPlayerModel implements PlaybackModel {
     private final BiConsumer<Boolean, Boolean> playbackStateChangedHandler;
     private final Consumer<Boolean> audioOutputStateChangedHandler;
 
-    // this is the critical wiring that allows the framework (JavaFX) to call
+    // This is the critical wiring that allows the framework (JavaFX) to call
     // into our model logic every time it goes around its event loop. Every GUI
     // system has an event loop so that button clicks, key presses and window
     // resizes can be responded to. Most offer ways of running additional logic
@@ -64,12 +78,12 @@ public class SingleThreadedVideoPlayerModel implements PlaybackModel {
     };
 
     private File videoFile; // Path to the media that comes from the command line
-    private FFmpegFrameGrabber grabber; // this is the 3rd party video media decoder. It deals in JavaCV Frame objects.
-    private JavaFXFrameConverter converter; // takes Frame objects to JavaFX Image objects, which can be put on screen.
-    private AudioPlayer audioPlayer; // this is ours. It has some real time buffering smarts.
-    private PreparedFrame preparedFrame; // Ours, but is just an Image with some meta data added.
-    private boolean prepareNextFrameQueued; // true only when the event loop needs to call our prepareNextFrame method.
-    private boolean playbackOpen; // true when playback is happening.
+    private FFmpegFrameGrabber grabber; // This is the 3rd party video media decoder. It deals in JavaCV Frame objects.
+    private JavaFXFrameConverter converter; // Takes Frame objects to JavaFX Image objects, which can be put on screen.
+    private AudioPlayer audioPlayer; // This is ours. It has some real time buffering smarts.
+    private PreparedFrame preparedFrame; // Ours, but is just an Image with some meta-data added.
+    private boolean prepareNextFrameQueued; // True only when the event loop needs to call our prepareNextFrame method.
+    private boolean playbackOpen; // True when playback is happening.
     private boolean pauseRequested;
     private boolean audioOutputEnabled;
     private boolean audioAvailable;
@@ -100,7 +114,7 @@ public class SingleThreadedVideoPlayerModel implements PlaybackModel {
         this.statusChangedHandler = statusChangedHandler;
         this.playbackStateChangedHandler = playbackStateChangedHandler;
         this.audioOutputStateChangedHandler = audioOutputStateChangedHandler;
-        // Effects are constructed here, once and in command line order (see FrameProcessorOption.instantiate).
+        // Effects are constructed here, once and in command-line order (see FrameProcessorOption.instantiate).
         this.frameProcessors = FrameProcessorOption.instantiate(frameProcessorOptions);
     }
 
@@ -359,12 +373,12 @@ public class SingleThreadedVideoPlayerModel implements PlaybackModel {
         return null;
     }
 
-    // this is called on a heart beat by the GUI thread. We want to be co operative here by (a) not blocking, and (b)
+    // This is called on a heart beat by the GUI thread. We want to be co-operative here by (a) not blocking, and (b)
     // getting our required work out of the way quickly so that we can return control flow to the JavaFX event loop for
     // handling user interaction with the GUI and rendering. We have three jobs: (1) keep audio flowing if sound is on,
-    // (2) display a frame if it is due and (3) prepare the next frame if were in the window after the previous frame
-    // has gone to the display. We dont buffer frames here, just handling them one at a time. Not a great architecture,
-    // living on the edge a bit, but cant do much better on a single thread.
+    // (2) display a frame if it is due and (3) prepare the next frame if we're in the window after the previous frame
+    // has gone to the display. We don't buffer frames here, just handling them one at a time. Not a great architecture,
+    // living on the edge a bit, but can't do much better on a single thread.
     private void pumpPlayback(long now) {
         if (!playbackOpen) {
             return;
@@ -375,11 +389,11 @@ public class SingleThreadedVideoPlayerModel implements PlaybackModel {
 
         // Task (2)
         if (preparedFrame != null && preparedFrame.targetTimeNs() <= now) {
-            // we have a prepared frame ready to go and it is due (or just past due!) so get it up on screen ASAP!
+            // We have a prepared frame ready to go and it is due (or just past due!) so get it up on screen ASAP!
             displayPreparedFrame(now);
         }
 
-        // Task (3). Well try and be nice to the GUI event loop here by queueing the prepareNextFrame call rather than
+        // Task (3). We'll try and be nice to the GUI event loop here by queueing the prepareNextFrame call rather than
         // hogging the thread and doing it here, hence the tricky callback and use of prepareNextFrameQueued. Feel free
         // to replace this whole block with simple linear control flow logic
         // such as: if (!pauseRequested && preparedFrame == null) prepareNextFrame();
@@ -502,12 +516,12 @@ public class SingleThreadedVideoPlayerModel implements PlaybackModel {
             try {
                 grabber.stop();
             } catch (Exception e) {
-                // the resource is being closed; there is no useful recovery action.
+                // The resource is being closed; there is no useful recovery action.
             }
             try {
                 grabber.close();
             } catch (Exception e) {
-                // the resource is being closed; there is no useful recovery action.
+                // The resource is being closed; there is no useful recovery action.
             }
             grabber = null;
         }

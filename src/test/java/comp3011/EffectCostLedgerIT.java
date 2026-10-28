@@ -1,4 +1,12 @@
-// checks effect cost ledger. These tests target a specific behaviour instead of relying on a large collection of unrelated assertions.
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Profiling evidence, run by "mvn verify" (maven-failsafe-plugin).
+ */
+// measures what each effect costs per frame, as evidence for where optimisation effort is worth spending.
 package comp3011;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,9 +30,9 @@ import org.junit.jupiter.api.Test;
  * <p>
  * Optimisation effort should go where the time goes, so this ledger is the starting point for any future
  * performance work on the effects. It also explains the shape of the threading design: a 24 fps video gives each
- * frame a budget of 41.7 ms, and the ledger shows how quickly a stack of effects exhausts one cores budget   which
+ * frame a budget of 41.7 ms, and the ledger shows how quickly a stack of effects exhausts one core's budget - which
  * is why frames are spread across all cores. The table is printed and written to
- * {@code target/effect cost ledger.txt}.
+ * {@code target/effect-cost-ledger.txt}.
  * </p>
  *
  * <p>
@@ -65,7 +73,7 @@ class EffectCostLedgerIT {
         effect.initialise(reel.videoInfo());
 
         reel.rewind();
-        runThrough(effect, reel); // Warm up: lets the JIT compile the effect before it is timed.
+        runThrough(effect, reel); // Warm-up: lets the JIT compile the effect before it is timed.
 
         double fastestPassMs = Double.MAX_VALUE;
         for (int pass = 0; pass < TIMED_PASSES; pass++) {
@@ -132,7 +140,7 @@ class EffectCostLedgerIT {
                 List<Frame> decoded = new ArrayList<>();
                 Frame frame;
                 while (decoded.size() < frames && (frame = grabber.grabImage()) != null) {
-                    decoded.add(frame.clone()); // the grabber reuses its frame buffer, so keep a copy.
+                    decoded.add(frame.clone()); // The grabber reuses its frame buffer, so keep a copy.
                 }
                 Frame first = decoded.get(0);
                 InfoVideo info = new InfoVideo(stream.mediaName(), stream.totalVideoFrames(), first.imageWidth,

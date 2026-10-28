@@ -1,3 +1,18 @@
+/*
+ * Starter code supplied for Adelaide University COMP3011 Assignment 2.
+ * Students are free to modify this file for assessment purposes.
+ *
+ * Authors:
+ *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
+ *   2. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *      - Re-engineered as the multi-threaded model. The original single threaded implementation now lives,
+ *        unchanged in behaviour, in SingleThreadedVideoPlayerModel. Public behaviour (seeking rules, pause,
+ *        start over, end of playback, audio toggling, status messages) is preserved from the original; decoding,
+ *        effects and audio output have moved to PlaybackSession's threads, leaving this class to coordinate them
+ *        and display frames on the JavaFX application thread.
+ *
+ * Copyright 2026 Simon Ratcliffe
+ */
 // coordinates playback on the JavaFX thread while decoding and effects happen elsewhere. This keeps the controls responsive during expensive processing.
 package comp3011;
 
@@ -12,12 +27,12 @@ import javafx.animation.AnimationTimer;
 import javafx.scene.image.Image;
 
 /**
- * The model part of the video player model view controller architecture: the multi threaded player.
+ * The model part of the video player model-view-controller architecture: the multi-threaded player.
  *
  * <p>
  * This class is the <b>coordinator</b>. It lives entirely on the JavaFX application thread: it receives user
  * commands from the {@link VideoPlayerController}, owns the {@link PlaybackClock}, and owns at most one
- * {@link PlaybackSession}   the bundle of threads that decode, apply effects and play sound. Its only per frame
+ * {@link PlaybackSession} - the bundle of threads that decode, apply effects and play sound. Its only per-frame
  * job is {@link #pumpPlayback(long)}: on each JavaFX heartbeat, put the next frame on screen if it is finished and
  * due. Everything expensive happens elsewhere, so the GUI stays responsive no matter how many effects are stacked.
  * See {@link PlaybackSession} for a diagram of the threads.
@@ -27,13 +42,13 @@ import javafx.scene.image.Image;
  * <ul>
  * <li>All fields except {@link #audioOutputEnabled} are confined to the JavaFX thread, so need no locking.</li>
  * <li>{@link #audioOutputEnabled} is read by the decoder and audio threads, so it is {@code volatile}.</li>
- * <li>Cross thread data flows only through thread safe hand offs: the sessions blocking presentation queue,
+ * <li>Cross-thread data flows only through thread-safe hand-offs: the session's blocking presentation queue,
  * {@link java.util.concurrent.CompletableFuture}s for processed frames, and the synchronised clock.</li>
- * <li>Seeks never wait for in flight work. Instead a new <i>epoch</i> begins, and frames or audio from older
+ * <li>Seeks never wait for in-flight work. Instead a new <i>epoch</i> begins, and frames or audio from older
  * epochs are recognised and discarded wherever they turn up (see {@link VideoDecoder}).</li>
  * <li>Every frame stays on screen for a full frame period: if processing ever falls behind, the clock slips
  * rather than rushing through the backlog (which would make frames flash past unseen), and playback only starts
- * once a first batch of frames is ready (pre roll).</li>
+ * once a first batch of frames is ready (pre-roll).</li>
  * <li>Frames are displayed strictly in decode order, one at a time, so frame correctness does not depend on which
  * worker finishes first.</li>
  * </ul>
@@ -41,7 +56,7 @@ import javafx.scene.image.Image;
 public class VideoPlayerModel implements PlaybackModel {
     private static final long NO_SEEK_REQUEST = -1; // Sentinel value used when no seek position is active.
     private static final long FIVE_SECONDS_US = 5_000_000L;
-    // Longest we wait for the pre roll (see prerollComplete) before starting playback anyway.
+    // Longest we wait for the pre-roll (see prerollComplete) before starting playback anyway.
     private static final long MAX_PREROLL_WAIT_NS = 2_000_000_000L;
     // How many frames per worker must be ready before playback starts; see prerollComplete.
     private static final int PREROLL_BATCHES = 2;
@@ -55,7 +70,7 @@ public class VideoPlayerModel implements PlaybackModel {
     private final BiConsumer<Boolean, Boolean> playbackStateChangedHandler;
     private final Consumer<Boolean> audioOutputStateChangedHandler;
 
-    // the JavaFX heartbeat, as in the original: calls pumpPlayback once per pulse (typically 60 times a second).
+    // The JavaFX heartbeat, as in the original: calls pumpPlayback once per pulse (typically 60 times a second).
     private final AnimationTimer playbackTimer = new AnimationTimer() {
         @Override
         public void handle(long now) {
@@ -64,8 +79,8 @@ public class VideoPlayerModel implements PlaybackModel {
     };
 
     private File videoFile; // Path to the media that comes from the command line
-    private PlaybackSession session; // the threads and resources of the current playback, or null.
-    private boolean playbackOpen; // true when playback is happening.
+    private PlaybackSession session; // The threads and resources of the current playback, or null.
+    private boolean playbackOpen; // True when playback is happening.
     private boolean pauseRequested;
     private volatile boolean audioOutputEnabled; // Read by decoder and audio threads.
     private long epoch; // Increments on every (re)start or seek; see PlaybackClock.
@@ -75,7 +90,7 @@ public class VideoPlayerModel implements PlaybackModel {
     private int intFrameRate;
     private long logicalPlaybackBaseUs;
     private long epochFirstMediaUs; // Media timestamp of the first frame shown in the current epoch.
-    private long epochStartedNs; // when the current epoch began, for the pre roll time limit.
+    private long epochStartedNs; // When the current epoch began, for the pre-roll time limit.
     private long relativeSeekBaseUs = NO_SEEK_REQUEST;
 
     public VideoPlayerModel(
@@ -92,12 +107,12 @@ public class VideoPlayerModel implements PlaybackModel {
         this.statusChangedHandler = statusChangedHandler;
         this.playbackStateChangedHandler = playbackStateChangedHandler;
         this.audioOutputStateChangedHandler = audioOutputStateChangedHandler;
-        // Effects are constructed here, once, on this single thread and in command line order (see
+        // Effects are constructed here, once, on this single thread and in command-line order (see
         // FrameProcessorOption.instantiate for why the order and the single thread matter). They are shared by
         // every worker thread of every playback session.
         this.frameProcessors = FrameProcessorOption.instantiate(frameProcessorOptions);
         this.workerCount = FrameProcessingPipeline.defaultWorkerCount();
-        // the constructor runs on the JavaFX Application Thread, once the toolkit is up: the moment to make sure the
+        // The constructor runs on the JavaFX Application Thread, once the toolkit is up: the moment to make sure the
         // threads that draw the frames always get CPU time when they need it.
         DisplayThreadPriority.boostDisplayThreads();
     }
@@ -266,7 +281,7 @@ public class VideoPlayerModel implements PlaybackModel {
         epochStartedNs = System.nanoTime();
     }
 
-    // Called on every JavaFX heartbeat. Unlike the single threaded model this never decodes or processes   it only
+    // Called on every JavaFX heartbeat. Unlike the single threaded model this never decodes or processes - it only
     // looks at the head of the presentation queue, so it always returns control to the GUI within microseconds.
     // Frames are taken strictly in decode order; at most one is shown per heartbeat.
     private void pumpPlayback(long now) {
@@ -304,7 +319,7 @@ public class VideoPlayerModel implements PlaybackModel {
 
         if (!clock.isStarted()) {
             // First frame since start/seek. When paused, show it straight away, as the original did. Otherwise wait
-            // for the pre roll, then anchor the clock so this frame is due right now and later frames follow it.
+            // for the pre-roll, then anchor the clock so this frame is due right now and later frames follow it.
             if (!pauseRequested && !prerollComplete(queue, now)) {
                 return;
             }
@@ -329,8 +344,8 @@ public class VideoPlayerModel implements PlaybackModel {
         }
     }
 
-    // Pre roll: start the clock only once the first PREROLL_BATCHES batches of frames   one frame per worker per
-    // batch   are ready, not just the first frame. Each batch is processed in parallel, so this costs only a fraction
+    // Pre-roll: start the clock only once the first PREROLL_BATCHES batches of frames - one frame per worker per
+    // batch - are ready, not just the first frame. Each batch is processed in parallel, so this costs only a fraction
     // of a second, but it gives the display a cushion against a slow start (a busy machine, a cold JIT): otherwise
     // the first few frames can fall due before their workers have finished them. Gives up waiting after
     // MAX_PREROLL_WAIT_NS, or when the queue holds the end of the media.
@@ -340,7 +355,7 @@ public class VideoPlayerModel implements PlaybackModel {
         }
         int wanted = Math.min(workerCount * PREROLL_BATCHES, queue.size() + queue.remainingCapacity());
         int ready = 0;
-        for (VideoDecoder.PresentationItem<Image> item : queue) { // Weakly consistent iteration: thread safe.
+        for (VideoDecoder.PresentationItem<Image> item : queue) { // Weakly consistent iteration: thread-safe.
             if (item.epoch() != epoch) {
                 continue;
             }
@@ -359,7 +374,7 @@ public class VideoPlayerModel implements PlaybackModel {
 
     // A frame shown later than its slot must still stay on screen for a full frame period. If we instead raced
     // through the backlog to catch up, the frames behind it would each flash up for a single screen refresh and,
-    // to a viewer (or a screen capturing test), be dropped. So when we are more than half a frame late, the clock
+    // to a viewer (or a screen-capturing test), be dropped. So when we are more than half a frame late, the clock
     // slips back by the lateness: playback is momentarily delayed but every frame is shown properly. (Lateness under
     // half a frame is normal: frames can only change on a screen refresh, which at 60Hz is every 16.7ms.)
     private void slipIfLate(VideoDecoder.DecodedFrame<Image> frame, long now) {
@@ -378,7 +393,7 @@ public class VideoPlayerModel implements PlaybackModel {
 
         // Dump some logging to the console once per second so that real time performance can be monitored. As in
         // the original, headroom is how long before its display deadline the frame was ready. Because frames are now
-        // processed ahead of time this can exceed one frame period   the buffered count shows how far ahead.
+        // processed ahead of time this can exceed one frame period - the buffered count shows how far ahead.
         if (intFrameRate > 0 && frame.frameNumber() % intFrameRate == 0) {
             long remainingUs = (clock.targetTimeNs(frame.mediaTimestampUs()) - processed.readyAtNs()) / 1_000L;
             String colour = remainingUs < 0 ? "\u001B[31m" : "\u001B[32m";
@@ -418,7 +433,7 @@ public class VideoPlayerModel implements PlaybackModel {
         playbackTimer.stop();
         playbackOpen = false;
         if (session != null) {
-            session.close(); // Joins the sessions threads before returning.
+            session.close(); // Joins the session's threads before returning.
             session = null;
         }
     }

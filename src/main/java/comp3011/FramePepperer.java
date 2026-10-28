@@ -1,3 +1,14 @@
+/*
+ * Starter code supplied for Adelaide University COMP3011 Assignment 2.
+ * Students are free to modify this file for assessment purposes.
+ * 
+ * Authors:
+ *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
+ *   2. <Student Name> (<Student Number>)
+ *      - Added a one-line summary of the class's role.
+ *
+ * Copyright 2026 Simon Ratcliffe
+ */
 // implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
@@ -12,7 +23,7 @@ import org.bytedeco.javacv.Frame;
  *
  * <p>
  * {@link #process(Frame, InfoFrame)} generates a deterministic,
- * Poisson distributed number of marks for each frame.
+ * Poisson-distributed number of marks for each frame.
  * {@link #drawPepperShape(ByteBuffer, double, double, double, double, double, double, double, PepperShape)}
  * creates each softly edged, warped elliptical spot.
  * </p>

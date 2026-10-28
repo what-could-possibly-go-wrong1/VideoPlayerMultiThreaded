@@ -1,3 +1,11 @@
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file.
+ */
 // keeps thread priority configuration separate from the playback logic.
 package comp3011;
 
@@ -7,12 +15,12 @@ package comp3011;
  * <p>
  * Frames prepared ahead of time are wasted if the screen is not redrawn when they are due. JavaFX redraws on two
  * threads: the <i>JavaFX Application Thread</i> (our display logic runs here) and its <i>render thread</i>
- * ({@code QuantumRenderer 0}), which turns the scene into pixels. Both use little CPU but must get it promptly.
+ * ({@code QuantumRenderer-0}), which turns the scene into pixels. Both use little CPU but must get it promptly.
  * </p>
  *
  * <p>
  * The player already runs its own heavy threads below normal priority (see {@link FrameProcessingPipeline} and
- * {@link VideoDecoder}), which keeps them out of the displays way. But on a shared machine the competition also comes
+ * {@link VideoDecoder}), which keeps them out of the display's way. But on a shared machine the competition also comes
  * from <i>other programs</i>, whose threads run at normal priority. Raising the two display threads above normal lets
  * them win that competition too. On Windows, which honours Java thread priorities, the boost maps to
  * {@code THREAD_PRIORITY_HIGHEST}; elsewhere it is a harmless hint.
@@ -24,7 +32,7 @@ package comp3011;
  * </p>
  */
 final class DisplayThreadPriority {
-    // Highest short of MAX_PRIORITY (which Windows may treat as time critical). These threads use very little CPU,
+    // Highest short of MAX_PRIORITY (which Windows may treat as time-critical). These threads use very little CPU,
     // so ranking them above every normal thread on the machine cannot starve anything else.
     static final int DISPLAY_PRIORITY = Thread.MAX_PRIORITY - 1;
     private static final String RENDER_THREAD_PREFIX = "QuantumRenderer";
@@ -42,4 +50,3 @@ final class DisplayThreadPriority {
         }
     }
 }
-

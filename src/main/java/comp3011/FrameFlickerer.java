@@ -1,3 +1,14 @@
+/*
+ * Starter code supplied for Adelaide University COMP3011 Assignment 2.
+ * Students are free to modify this file for assessment purposes.
+ * 
+ * Authors:
+ *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
+ *   2. <Student Name> (<Student Number>)
+ *      - Added a one-line summary of the class's role.
+ *
+ * Copyright 2026 Simon Ratcliffe
+ */
 // implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
@@ -7,8 +18,8 @@ import java.util.Random;
 import org.bytedeco.javacv.Frame;
 
 /**
- * Varies a frames brightness to simulate film projector flicker. Because of slight variations in timing and lamp
- * incandescence, old movie projectors would cause the movies to flicker, hence movies became known as flicks.
+ * Varies a frame's brightness to simulate film-projector flicker. Because of slight variations in timing and lamp
+ * incandescence, old movie projectors would cause the movies to flicker, hence movies became known as 'flicks'.
  *
  * <p>
  * The media name and frame number seed a deterministic random brightness

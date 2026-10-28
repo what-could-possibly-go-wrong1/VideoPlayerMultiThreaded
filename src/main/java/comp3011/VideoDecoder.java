@@ -1,4 +1,13 @@
-// reads frames off the UI thread and passes owned copies to the effect workers. Old seek results are ignored so stale frames dont reappear.
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Takes over VideoPlayerModel.readNextVideoFrame and the decoder side of seeking from the single
+ * threaded design, moving them off the JavaFX application thread.
+ */
+// reads frames off the UI thread and passes owned copies to the effect workers. Old seek results are ignored so stale frames don't reappear.
 package comp3011;
 
 import java.util.concurrent.BlockingQueue;
@@ -9,13 +18,13 @@ import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
 
 /**
- * The {@code video decoder} thread: pulls frames out of FFmpeg as fast as the downstream buffers allow, routes sound
- * to the {@link AudioSink}, and dispatches each picture to the {@link FrameProcessingPipeline}   publishing a
+ * The {@code video-decoder} thread: pulls frames out of FFmpeg as fast as the downstream buffers allow, routes sound
+ * to the {@link AudioSink}, and dispatches each picture to the {@link FrameProcessingPipeline} - publishing a
  * {@link PresentationItem} per frame, <b>in decode order</b>, to a bounded presentation queue read by the display.
  *
  * <h2>Thread confinement of the decoder</h2>
  * <p>
- * {@link FFmpegFrameGrabber} is not thread safe and, worse, reuses one frame buffer for every grab. So the grabber is
+ * {@link FFmpegFrameGrabber} is not thread-safe and, worse, reuses one frame buffer for every grab. So the grabber is
  * <i>confined</i> to this thread: after {@link #start()} no other thread touches it until {@link #close()} has joined
  * this thread. Requests from the JavaFX thread (seeks) arrive as messages on a queue rather than as direct calls, and
  * every picture is copied into a {@link FramePool} frame before it leaves this thread.
@@ -24,7 +33,7 @@ import org.bytedeco.javacv.Frame;
  * <h2>Seeking and epochs</h2>
  * <p>
  * Every seek is tagged with a new, increasing <i>epoch</i>. Everything this thread publishes carries the epoch it was
- * decoded in, so consumers can recognise and discard work made stale by a later seek   including frames still in
+ * decoded in, so consumers can recognise and discard work made stale by a later seek - including frames still in
  * flight in the worker pool at the moment of the seek (those skip their effects entirely; see {@link #isCurrent}).
  * Seeks arriving faster than they can be served are coalesced: only the newest matters.
  * </p>
@@ -65,7 +74,7 @@ public final class VideoDecoder<T> implements AutoCloseable {
     public record DecodeFailure<T>(long epoch, Exception error) implements PresentationItem<T> {
     }
 
-    /** Stream level facts needed to build {@link InfoVideo} for the effects. */
+    /** Stream-level facts needed to build {@link InfoVideo} for the effects. */
     public record StreamInfo(
             String mediaName,
             int totalVideoFrames,
@@ -96,7 +105,7 @@ public final class VideoDecoder<T> implements AutoCloseable {
     private FramePool framePool;
 
     /**
-     * @param grabber an already started grabber; ownership passes to this decoders thread on {@link #start()}
+     * @param grabber an already started grabber; ownership passes to this decoder's thread on {@link #start()}
      * @param grabAudio grab audio as well as video (true if the media has sound)
      * @param initialEpoch the epoch of the first frames decoded
      * @param presentationQueue bounded queue the decoded frames are published to, in decode order
@@ -192,7 +201,7 @@ public final class VideoDecoder<T> implements AutoCloseable {
         if (framePool == null) {
             // First picture of this playback session: now we know its exact layout. Effects are initialised here,
             // on this thread, before any frame is submitted, so no worker can be running an effect yet; the executor
-            // hand off in submit() then makes the initialised state visible to the workers.
+            // hand-off in submit() then makes the initialised state visible to the workers.
             pipeline.initialise(videoInfoFor(frame));
             framePool = new FramePool(frame, framePoolCapacity);
         } else if (!framePool.matches(frame)) {

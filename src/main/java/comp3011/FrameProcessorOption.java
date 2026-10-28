@@ -1,3 +1,11 @@
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file (Specification Part 1).
+ */
 // maps command line effect names to their implementations so argument parsing stays separate from pixel processing.
 package comp3011;
 
@@ -12,19 +20,19 @@ import java.util.function.Supplier;
  *
  * <p>
  * Each constant binds together everything the rest of the program needs to know about one effect: its short
- * (single letter) flag, its long flag, its help description and how to construct it. Keeping these in one table means
+ * (single-letter) flag, its long flag, its help description and how to construct it. Keeping these in one table means
  * that the help text, the parser and the effect construction can never drift out of step with each other.
  * </p>
  *
  * <p>
  * <b>Adding a new effect:</b> write the new {@link FrameProcessor} subclass, then add one constant here (in the
- * position it should appear in the help). Nothing else needs to change   {@link CommandLineController} parses and
+ * position it should appear in the help). Nothing else needs to change - {@link CommandLineController} parses and
  * prints help from this table, and the playback models instantiate effects through {@link #instantiate(List)}.
  * </p>
  *
  * <p>
  * The declaration order below is the order the effects are listed in the help text, which TITAN checks letter for
- * letter   do not reorder.
+ * letter - do not reorder.
  * </p>
  */
 public enum FrameProcessorOption {
@@ -56,7 +64,7 @@ public enum FrameProcessorOption {
         return shortFlag;
     }
 
-    /** The long flag including its leading double dash, e.g. {@code   number frames}. */
+    /** The long flag including its leading double dash, e.g. {@code --number-frames}. */
     public String longFlag() {
         return "--" + longName;
     }
@@ -74,7 +82,7 @@ public enum FrameProcessorOption {
         return Optional.empty();
     }
 
-    /** Looks up an option by its full long flag, e.g. {@code   dust frames}. */
+    /** Looks up an option by its full long flag, e.g. {@code --dust-frames}. */
     public static Optional<FrameProcessorOption> fromLongFlag(String flag) {
         for (FrameProcessorOption option : values()) {
             if (option.longFlag().equals(flag)) {
@@ -89,8 +97,8 @@ public enum FrameProcessorOption {
      *
      * <p>
      * Order matters for two reasons: effects are applied in list order, and several effects number their instances
-     * from a static counter at construction time (so the second {@code  d} gets a different, but reproducible, random
-     * seed from the first). This method must therefore be called once, from a single thread, before playback starts  
+     * from a static counter at construction time (so the second {@code -d} gets a different, but reproducible, random
+     * seed from the first). This method must therefore be called once, from a single thread, before playback starts -
      * both playback models do so from their constructor on the JavaFX application thread.
      * </p>
      */

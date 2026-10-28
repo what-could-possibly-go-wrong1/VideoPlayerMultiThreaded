@@ -1,3 +1,15 @@
+/*
+ * Starter code supplied for Adelaide University COMP3011 Assignment 2.
+ * Students are free to modify this file for assessment purposes.
+ * 
+ * Authors:
+ *   1. Simon Ratcliffe, in collaboration with GPT-5.6 Terra
+ *   2. 
+ *      - Made safe for concurrent process() calls: the damage-mask cache is now per thread, and the per-block
+ *        channel scale indices are passed in a call-local array instead of instance fields. Arithmetic unchanged.
+ *
+ * Copyright 2026 Simon Ratcliffe
+ */
 // implements one frame effect behind the shared processor interface. Keeping each effect separate allows effects to be combined in the requested order.
 package comp3011;
 
@@ -8,11 +20,11 @@ import org.bytedeco.javacv.Frame;
 
 /**
  * Adds uneven brightness and colour staining to simulate aged film emulsion.
- * Having played around with the tuning of this as much as Id like, but the
+ * Having played around with the tuning of this as much as I'd like, but the
  * effect still looks okay.
  *
  * <p>
- * Initialisation builds multi scale noise fields and colour lookup tables.
+ * Initialisation builds multi-scale noise fields and colour lookup tables.
  * {@link #process(Frame, InfoFrame)} samples those fields in image blocks and
  * applies the selected channel scales through {@link #applyMottleBlock(ByteBuffer, int[], int, int, int, int, int, int)}.
  * </p>
@@ -51,7 +63,7 @@ public class FrameMottler extends FrameProcessor {
     private int mediaSeed;
     // Damage masks change only every DAMAGE_MASK_BLEND_FRAMES frames, so they are cached. The cache is written on a
     // segment change, which would race between worker threads, so each thread has its own cache. (Frames arrive at
-    // each worker roughly in order, so the per thread caches still hit almost every time.)
+    // each worker roughly in order, so the per-thread caches still hit almost every time.)
     private ThreadLocal<DamageMaskCache> damageMaskCachePerThread;
     private int[] xGridLeft;
     private double[] xGridBlend;
@@ -61,7 +73,7 @@ public class FrameMottler extends FrameProcessor {
     private double minimumScale;
     private double maximumScale;
 
-    // Positions in the per call blockScaleIndices array; see mottleFrame.
+    // Positions in the per-call blockScaleIndices array; see mottleFrame.
     private static final int BLUE = 0;
     private static final int GREEN = 1;
     private static final int RED = 2;
@@ -275,8 +287,8 @@ public class FrameMottler extends FrameProcessor {
         int width = videoInfo.imageWidth();
         int channels = videoInfo.imageChannels();
         int stride = videoInfo.imageStride();
-        // Per block blue/green/red scale indices. Previously instance fields; now local to this call so that
-        // concurrent frames cannot overwrite each others values between "prepare" and "apply".
+        // Per-block blue/green/red scale indices. Previously instance fields; now local to this call so that
+        // concurrent frames cannot overwrite each other's values between "prepare" and "apply".
         int[] blockScaleIndices = new int[3];
 
         for (int blockY = 0; blockY < height; blockY += EFFECT_BLOCK_SIZE) {
@@ -422,7 +434,7 @@ public class FrameMottler extends FrameProcessor {
         return Math.max(min, Math.min(value, max));
     }
 
-    // One threads cached pair of damage masks, valid for the stored segment.
+    // One thread's cached pair of damage masks, valid for the stored segment.
     private static final class DamageMaskCache {
         int segment = Integer.MIN_VALUE;
         double[] maskA;

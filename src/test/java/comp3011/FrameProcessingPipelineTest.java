@@ -1,4 +1,12 @@
-// checks frame processing pipeline test. These tests target a specific behaviour instead of relying on a large collection of unrelated assertions.
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file.
+ */
+// proves effects shared between worker threads still produce frames pixel-identical to single threaded processing.
 package comp3011;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -18,18 +26,18 @@ import org.junit.jupiter.api.Test;
  * Concurrency correctness of the effects + worker pool, on synthetic frames (fast, and needs no video decoder).
  *
  * <p>
- * The central property of the multi threaded design is that it is a pure performance optimisation: for the same
- * effects in the same order, every frame must be <b>pixel identical</b> to sequential, single threaded processing.
- * These tests run the whole effect catalogue   with the effects that keep per frame working state (jitter, mottle,
- * bleed) repeated, so instances are shared and stacked   on many more worker threads than frames in flight would
+ * The central property of the multi-threaded design is that it is a pure performance optimisation: for the same
+ * effects in the same order, every frame must be <b>pixel-identical</b> to sequential, single threaded processing.
+ * These tests run the whole effect catalogue - with the effects that keep per-frame working state (jitter, mottle,
+ * bleed) repeated, so instances are shared and stacked - on many more worker threads than frames in flight would
  * normally need, to maximise interleaving. With the original (unsafe) jitter/mottle/bleed implementations this test
- * fails: most frames differ, or the mottler crashes on a half initialised cache.
+ * fails: most frames differ, or the mottler crashes on a half-initialised cache.
  * </p>
  */
 class FrameProcessingPipelineTest {
     private static final int WIDTH = 320;
     private static final int HEIGHT = 180;
-    private static final int FRAME_COUNT = 96; // > one mottle damage mask segment (72 frames)
+    private static final int FRAME_COUNT = 96; // > one mottle damage-mask segment (72 frames)
     private static final String EFFECTS = "nssnfwyvdjmbpjjmmbb";
 
     @Test

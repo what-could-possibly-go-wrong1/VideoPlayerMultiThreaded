@@ -1,4 +1,12 @@
-// checks command line controller test. These tests target a specific behaviour instead of relying on a large collection of unrelated assertions.
+/*
+ * COMP3011 Assignment 2 - multi-threaded video player.
+ *
+ * Authors:
+ *   1. <Student Name> (<Student Number>), in collaboration with Claude (Anthropic)
+ *
+ * New file. Regression tests for Specification Part 1.
+ */
+// regression tests for the command line: exact help text, short/long/stacked flags, ordering and repeats.
 package comp3011;
 
 import static comp3011.FrameProcessorOption.BLACK_AND_WHITE;
@@ -33,7 +41,7 @@ import org.junit.jupiter.api.Test;
  */
 class CommandLineControllerTest {
 
-    // the help text exactly as specified (with the staff correction making every long option plural).
+    // The help text exactly as specified (with the staff correction making every long option plural).
     private static final String EXPECTED_HELP = String.join(System.lineSeparator(),
             "Usage: VideoPlayer [options] [video-file]",
             "",
