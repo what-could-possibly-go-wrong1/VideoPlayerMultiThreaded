@@ -1,5 +1,5 @@
 # COMP3011 Assignment 2 - Multi-threaded Video Player
-
+!!I forgot to upload everything to a github repo before doing everything and only saw I had to when re-reading the instructions!!
 For more information on this code and how to get started, see https://learn.adelaide.edu.au/courses/30747/assignments/94505
 
 Starter code by Simon Ratcliffe (in collaboration with GPT-5.6 Terra). Modifications and new files by
